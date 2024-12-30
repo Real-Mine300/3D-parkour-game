@@ -431,99 +431,67 @@ class ParkourGame {
             this.scene.remove(obstacle);
         }
 
-        // Reset player
-        this.player.position.set(0, 0, 0);
-        this.velocity.set(0, 0, 0);
-
-        if (this.useFixedLevels && this.levels.has(levelNumber)) {
-            this.createFixedLevel(levelNumber);
-        } else {
-            this.createProceduralLevel(levelNumber);
-        }
-
+        // Create new level
+        this.createLevel(levelNumber);
+        
+        // Update level display
         document.getElementById('level').textContent = `Level: ${levelNumber}`;
     }
 
-    createFixedLevel(levelNumber) {
-        const levelData = this.levels.get(levelNumber);
-        
-        // Create base floor
-        this.createFloor();
-
-        // Create platforms
-        levelData.platforms.forEach(([type, x, y, z, props = {}]) => {
-            switch(type) {
-                case 'platform':
-                    this.addPlatform(new THREE.Vector3(x, y, z));
-                    break;
-                case 'glass':
-                    this.addGlassBlock(new THREE.Vector3(x, y, z));
-                    break;
-                case 'ice':
-                    this.addIceBlock(new THREE.Vector3(x, y, z));
-                    break;
-                case 'leaves':
-                    this.addLeafBlock(new THREE.Vector3(x, y, z));
-                    break;
-            }
-        });
-
-        // Create obstacles
-        levelData.obstacles.forEach(([type, x, y, z, props = {}]) => {
-            switch(type) {
-                case 'spike':
-                    this.addSpike(new THREE.Vector3(x, y, z));
-                    break;
-                case 'cannon':
-                    this.addCannon(new THREE.Vector3(x, y, z), props.direction);
-                    break;
-            }
-        });
-    }
-
-    createProceduralLevel(levelNumber) {
-        // Create base floor
-        this.createFloor();
+    createLevel(levelNumber) {
+        // Create floor
+        const floor = new THREE.Mesh(
+            new THREE.BoxGeometry(100, 1, 100),
+            new THREE.MeshPhongMaterial({ color: 0x808080 })
+        );
+        floor.position.y = -0.5;
+        floor.receiveShadow = true;
+        this.scene.add(floor);
 
         // Calculate difficulty factors
         const difficulty = Math.min(levelNumber / 10, 1); // 0-1 scale
         const platformCount = Math.floor(5 + (levelNumber * 0.5));
-        const obstacleCount = Math.floor(levelNumber * 0.3);
 
         // Add platforms with increasing complexity
         for (let i = 0; i < platformCount; i++) {
-            const position = new THREE.Vector3(
-                Math.random() * 20 - 10,
-                (i + 1) * 2 * difficulty + Math.random() * 2,
-                5 + i * 3 + Math.random() * 5
+            const platform = new THREE.Mesh(
+                new THREE.BoxGeometry(2, 0.5, 2),
+                new THREE.MeshPhongMaterial({ color: 0x8b4513 })
             );
-
-            // Choose platform type based on level
-            if (levelNumber > 30 && Math.random() < 0.3) {
-                this.addLeafBlock(position);
-            } else if (levelNumber > 20 && Math.random() < 0.3) {
-                this.addIceBlock(position);
-            } else if (levelNumber > 10 && Math.random() < 0.3) {
-                this.addGlassBlock(position);
-            } else {
-                this.addPlatform(position);
-            }
+            platform.position.set(
+                Math.random() * 10 - 5,
+                i * 2 + 1,
+                Math.random() * 10 - 5
+            );
+            platform.castShadow = true;
+            platform.receiveShadow = true;
+            platform.userData.type = 'platform';
+            this.obstacles.push(platform);
+            this.scene.add(platform);
         }
 
-        // Add obstacles
-        for (let i = 0; i < obstacleCount; i++) {
-            const position = new THREE.Vector3(
-                Math.random() * 16 - 8,
-                Math.random() * 5 + 1,
-                5 + Math.random() * (platformCount * 3)
-            );
+        // Add finish block
+        const finishPosition = new THREE.Vector3(
+            0,
+            platformCount * 2,
+            10
+        );
+        this.createFinishBlock(finishPosition);
+    }
 
-            if (levelNumber > 25 && Math.random() < 0.3) {
-                this.addCannon(position, ['left', 'right', 'up'][Math.floor(Math.random() * 3)]);
-            } else {
-                this.addSpike(position);
-            }
-        }
+    createFinishBlock(position) {
+        const geometry = new THREE.BoxGeometry(2, 0.5, 2);
+        const material = new THREE.MeshPhongMaterial({
+            color: 0xffd700,
+            emissive: 0xffd700,
+            emissiveIntensity: 0.5
+        });
+        
+        this.finishBlock = new THREE.Mesh(geometry, material);
+        this.finishBlock.position.copy(position);
+        this.finishBlock.userData.type = 'finish';
+        this.obstacles.push(this.finishBlock);
+        this.scene.add(this.finishBlock);
     }
 
     initializeLevels() {
@@ -687,46 +655,6 @@ class ParkourGame {
         }.bind(this));
     }
 
-    createFinishBlock(position) {
-        const geometry = new THREE.BoxGeometry(2, 0.5, 2);
-        const material = new THREE.MeshPhongMaterial({
-            color: 0xffd700,
-            emissive: 0xffd700,
-            emissiveIntensity: 0.5
-        });
-        
-        this.finishBlock = new THREE.Mesh(geometry, material);
-        this.finishBlock.position.copy(position);
-        this.finishBlock.userData.type = 'finish';
-        
-        // Add particle effect
-        const particles = new THREE.Points(
-            new THREE.BufferGeometry(),
-            new THREE.PointsMaterial({
-                color: 0xffd700,
-                size: 0.1,
-                transparent: true,
-                opacity: 0.6
-            })
-        );
-        
-        // Create floating particles
-        const particlePositions = [];
-        for (let i = 0; i < 50; i++) {
-            particlePositions.push(
-                Math.random() * 2 - 1,
-                Math.random() * 1,
-                Math.random() * 2 - 1
-            );
-        }
-        particles.geometry.setAttribute('position', 
-            new THREE.Float32BufferAttribute(particlePositions, 3)
-        );
-        
-        this.finishBlock.add(particles);
-        this.scene.add(this.finishBlock);
-    }
-
     handleLevelComplete() {
         if (!this.levelCompleted) {
             this.levelCompleted = true;
@@ -757,29 +685,6 @@ class ParkourGame {
                 this.levelCompleted = false;
             }, 2000);
         }
-    }
-
-    createLevel(levelNumber) {
-        // ... existing level creation code ...
-
-        // Add finish block at the end of the level
-        const finishPosition = new THREE.Vector3(
-            0,
-            Math.random() * 2 + 1,
-            20 + (levelNumber * 2) // Increases distance with level
-        );
-        this.createFinishBlock(finishPosition);
-    }
-
-    createFloor() {
-        const floor = new THREE.Mesh(
-            new THREE.BoxGeometry(100, 1, 100),
-            new THREE.MeshPhongMaterial({ color: 0x808080 })
-        );
-        floor.position.y = -0.5;
-        floor.receiveShadow = true;
-        this.scene.add(floor);
-        return floor;
     }
 }
 
