@@ -41,6 +41,33 @@ class ParkourGame {
         this.cameraSmoothness = 0.1;
         this.zoomSmoothness = 0.1;
         
+        // Level system properties
+        this.levels = new Map(); // Store fixed level designs
+        this.currentLevel = 1;
+        this.maxLevels = 50;
+        this.useFixedLevels = true; // Toggle between fixed and procedural levels
+        
+        // Initialize fixed level designs
+        this.initializeLevels();
+        
+        // Camera settings
+        this.cameraAngle = 0; // Horizontal camera rotation
+        this.cameraHeight = 2;
+        this.cameraDistance = 10;
+        this.rotationSpeed = 0.03;
+        
+        // Movement settings
+        this.moveDirection = new THREE.Vector3();
+        this.baseSpeed = 0.15;
+        this.moveSpeed = this.baseSpeed;
+        this.sprintSpeed = this.baseSpeed * 1.8;
+        this.isShifting = false;
+        this.lastWPress = 0;
+        this.platformFriction = 0.98; // Slight slip effect
+        
+        // Finish block
+        this.finishBlock = null;
+        
         this.init();
     }
 
@@ -92,8 +119,19 @@ class ParkourGame {
             
             switch(e.key.toLowerCase()) {
                 case ' ':
-                case 'w':
                     if (this.isGrounded) this.jump();
+                    break;
+                case 'w':
+                    this.moveDirection.z = -1;
+                    // Handle double tap sprint
+                    const now = Date.now();
+                    if (now - this.lastWPress < 300) { // 300ms window for double tap
+                        this.moveSpeed = this.sprintSpeed;
+                    }
+                    this.lastWPress = now;
+                    break;
+                case 's':
+                    this.moveDirection.z = 1;
                     break;
                 case 'a':
                     this.moveDirection.x = -1;
@@ -101,24 +139,41 @@ class ParkourGame {
                 case 'd':
                     this.moveDirection.x = 1;
                     break;
-                case 's':
-                    this.moveDirection.z = 1;
-                    break;
-                case 'w':
-                    this.moveDirection.z = -1;
+                case 'shift':
+                    this.isShifting = true;
+                    this.moveSpeed = this.baseSpeed * 0.5; // Slow down while shifting
                     break;
             }
         });
 
         document.addEventListener('keyup', (e) => {
             switch(e.key.toLowerCase()) {
+                case 'w':
+                case 's':
+                    this.moveDirection.z = 0;
+                    if (this.moveSpeed === this.sprintSpeed) {
+                        this.moveSpeed = this.baseSpeed;
+                    }
+                    break;
                 case 'a':
                 case 'd':
                     this.moveDirection.x = 0;
                     break;
-                case 'w':
-                case 's':
-                    this.moveDirection.z = 0;
+                case 'shift':
+                    this.isShifting = false;
+                    this.moveSpeed = this.baseSpeed;
+                    break;
+            }
+        });
+
+        // Camera rotation with arrow keys
+        document.addEventListener('keydown', (e) => {
+            switch(e.key) {
+                case 'ArrowLeft':
+                    this.cameraAngle += this.rotationSpeed;
+                    break;
+                case 'ArrowRight':
+                    this.cameraAngle -= this.rotationSpeed;
                     break;
             }
         });
@@ -143,29 +198,6 @@ class ParkourGame {
 
         document.addEventListener('pointerlockchange', () => {
             this.isMouseLocked = document.pointerLockElement === this.renderer.domElement;
-        });
-
-        // Add arrow key camera rotation
-        document.addEventListener('keydown', (e) => {
-            if (!this.isPlaying) return;
-            
-            switch(e.key) {
-                case 'ArrowUp':
-                    this.cameraRotation.x += this.keyRotationSpeed;
-                    break;
-                case 'ArrowDown':
-                    this.cameraRotation.x -= this.keyRotationSpeed;
-                    break;
-                case 'ArrowLeft':
-                    this.cameraRotation.y += this.keyRotationSpeed;
-                    break;
-                case 'ArrowRight':
-                    this.cameraRotation.y -= this.keyRotationSpeed;
-                    break;
-            }
-            
-            // Limit vertical rotation
-            this.cameraRotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.cameraRotation.x));
         });
 
         // Add zoom control with mouse wheel
@@ -230,19 +262,14 @@ class ParkourGame {
     toggleAI() {
         this.useAI = !this.useAI;
         if (this.useAI) {
-            this.createAIPlayer();
+            if (!this.aiPlayer) {
+                this.aiPlayer = new AIPlayer(this);
+            }
+            this.aiPlayer.reset();
         } else if (this.aiPlayer) {
-            this.scene.remove(this.aiPlayer);
+            this.scene.remove(this.aiPlayer.model);
             this.aiPlayer = null;
         }
-    }
-
-    createAIPlayer() {
-        const geometry = new THREE.BoxGeometry(1, 1, 1);
-        const material = new THREE.MeshPhongMaterial({ color: 0xff0000 });
-        this.aiPlayer = new THREE.Mesh(geometry, material);
-        this.aiPlayer.position.x = 2;
-        this.scene.add(this.aiPlayer);
     }
 
     jump() {
@@ -253,22 +280,68 @@ class ParkourGame {
     }
 
     updatePhysics() {
-        // Apply gravity
-        this.velocity.y += this.gravity;
+        // Apply gravity if not grounded
+        if (!this.isGrounded) {
+            this.velocity.y += this.gravity;
+        }
         
-        // Update position
+        // Platform physics and collision detection
+        let onPlatform = false;
+        let currentPlatform = null;
+        
+        for (const obstacle of this.obstacles) {
+            if (this.checkCollision(this.player, obstacle)) {
+                switch(obstacle.userData.type) {
+                    case 'platform':
+                        if (this.velocity.y <= 0) {
+                            onPlatform = true;
+                            currentPlatform = obstacle;
+                            if (!this.isShifting) {
+                                // Apply platform slipperiness
+                                this.velocity.x *= this.platformFriction;
+                                this.velocity.z *= this.platformFriction;
+                            }
+                        }
+                        break;
+                    case 'glass':
+                        if (this.velocity.y < -0.2) {
+                            this.scene.remove(obstacle);
+                            this.obstacles = this.obstacles.filter(o => o !== obstacle);
+                        } else if (!this.isShifting) {
+                            onPlatform = true;
+                        }
+                        break;
+                    case 'leaves':
+                        // Always fall through leaves when standing still
+                        if (this.velocity.length() < 0.1) {
+                            setTimeout(() => {
+                                onPlatform = false;
+                                this.isGrounded = false;
+                            }, 500);
+                        }
+                        break;
+                    case 'finish':
+                        this.handleLevelComplete();
+                        break;
+                }
+            }
+        }
+
+        // Update grounded state
+        this.isGrounded = onPlatform || this.player.position.y <= 0;
+
+        // Apply movement
         this.player.position.add(this.velocity);
-        
-        // Ground check
+
+        // Ground check and void death
         if (this.player.position.y <= 0) {
             this.player.position.y = 0;
             this.velocity.y = 0;
             this.isGrounded = true;
+        } else if (this.player.position.y < -10) {
+            this.handleDeath();
         }
 
-        // Check collisions
-        this.checkCollisions();
-        
         // Update camera
         this.updateCamera();
     }
@@ -337,109 +410,168 @@ class ParkourGame {
         this.player.position.set(0, 0, 0);
         this.velocity.set(0, 0, 0);
 
-        // Create new level
-        this.createLevel(levelNumber);
-        
+        if (this.useFixedLevels && this.levels.has(levelNumber)) {
+            this.createFixedLevel(levelNumber);
+        } else {
+            this.createProceduralLevel(levelNumber);
+        }
+
         document.getElementById('level').textContent = `Level: ${levelNumber}`;
     }
 
-    createLevel(levelNumber) {
-        // Create floor
-        const floor = new THREE.Mesh(
-            new THREE.BoxGeometry(100, 1, 100),
-            new THREE.MeshPhongMaterial({ color: 0x808080 })
-        );
-        floor.position.y = -0.5;
-        floor.receiveShadow = true;
-        this.scene.add(floor);
-
-        // Add obstacles based on level
-        const obstacleCount = Math.min(levelNumber * 2, 20);
+    createFixedLevel(levelNumber) {
+        const levelData = this.levels.get(levelNumber);
         
+        // Create base floor
+        this.createFloor();
+
+        // Create platforms
+        levelData.platforms.forEach(([type, x, y, z, props = {}]) => {
+            switch(type) {
+                case 'platform':
+                    this.addPlatform(new THREE.Vector3(x, y, z));
+                    break;
+                case 'glass':
+                    this.addGlassBlock(new THREE.Vector3(x, y, z));
+                    break;
+                case 'ice':
+                    this.addIceBlock(new THREE.Vector3(x, y, z));
+                    break;
+                case 'leaves':
+                    this.addLeafBlock(new THREE.Vector3(x, y, z));
+                    break;
+            }
+        });
+
+        // Create obstacles
+        levelData.obstacles.forEach(([type, x, y, z, props = {}]) => {
+            switch(type) {
+                case 'spike':
+                    this.addSpike(new THREE.Vector3(x, y, z));
+                    break;
+                case 'cannon':
+                    this.addCannon(new THREE.Vector3(x, y, z), props.direction);
+                    break;
+            }
+        });
+    }
+
+    createProceduralLevel(levelNumber) {
+        // Create base floor
+        this.createFloor();
+
+        // Calculate difficulty factors
+        const difficulty = Math.min(levelNumber / 10, 1); // 0-1 scale
+        const platformCount = Math.floor(5 + (levelNumber * 0.5));
+        const obstacleCount = Math.floor(levelNumber * 0.3);
+
+        // Add platforms with increasing complexity
+        for (let i = 0; i < platformCount; i++) {
+            const position = new THREE.Vector3(
+                Math.random() * 20 - 10,
+                (i + 1) * 2 * difficulty + Math.random() * 2,
+                5 + i * 3 + Math.random() * 5
+            );
+
+            // Choose platform type based on level
+            if (levelNumber > 30 && Math.random() < 0.3) {
+                this.addLeafBlock(position);
+            } else if (levelNumber > 20 && Math.random() < 0.3) {
+                this.addIceBlock(position);
+            } else if (levelNumber > 10 && Math.random() < 0.3) {
+                this.addGlassBlock(position);
+            } else {
+                this.addPlatform(position);
+            }
+        }
+
+        // Add obstacles
         for (let i = 0; i < obstacleCount; i++) {
-            this.addRandomObstacle(levelNumber);
+            const position = new THREE.Vector3(
+                Math.random() * 16 - 8,
+                Math.random() * 5 + 1,
+                5 + Math.random() * (platformCount * 3)
+            );
+
+            if (levelNumber > 25 && Math.random() < 0.3) {
+                this.addCannon(position, ['left', 'right', 'up'][Math.floor(Math.random() * 3)]);
+            } else {
+                this.addSpike(position);
+            }
         }
     }
 
-    addRandomObstacle(levelNumber) {
-        const types = ['platform'];
-        if (levelNumber > 10) types.push('glass');
-        if (levelNumber > 20) types.push('spike');
-        if (levelNumber > 30) types.push('ice');
-        
-        const type = types[Math.floor(Math.random() * types.length)];
-        const position = new THREE.Vector3(
-            Math.random() * 20 - 10,
-            Math.random() * 5 + 1,
-            Math.random() * 20 - 10
-        );
-        
-        let obstacle;
-        switch(type) {
-            case 'glass':
-                obstacle = this.createGlassBlock(position);
-                break;
-            case 'spike':
-                obstacle = this.createSpike(position);
-                break;
-            case 'ice':
-                obstacle = this.createIceBlock(position);
-                break;
-            default:
-                obstacle = this.createPlatform(position);
-                break;
-        }
-        
-        obstacle.userData.type = type;
-        this.obstacles.push(obstacle);
-        this.scene.add(obstacle);
-    }
+    initializeLevels() {
+        // Define some fixed level layouts
+        // Format: [type, x, y, z, properties]
+        this.levels.set(1, {
+            platforms: [
+                ['platform', 0, 1, 5],
+                ['platform', 3, 2, 8],
+                ['platform', -2, 3, 12]
+            ],
+            obstacles: []
+        });
 
-    createPlatform(position) {
-        const platform = new THREE.Mesh(
-            new THREE.BoxGeometry(2, 0.5, 2),
-            new THREE.MeshPhongMaterial({ color: 0x8b4513 })
-        );
-        platform.position.copy(position);
-        platform.castShadow = true;
-        platform.receiveShadow = true;
-        return platform;
-    }
+        this.levels.set(2, {
+            platforms: [
+                ['platform', 0, 1, 5],
+                ['platform', 4, 2, 8],
+                ['glass', -3, 2, 10]
+            ],
+            obstacles: [
+                ['spike', 2, 1, 7]
+            ]
+        });
 
-    createGlassBlock(position) {
-        const glass = new THREE.Mesh(
-            new THREE.BoxGeometry(2, 0.5, 2),
-            new THREE.MeshPhongMaterial({
-                color: 0x88ccff,
-                transparent: true,
-                opacity: 0.3
-            })
-        );
-        glass.position.copy(position);
-        return glass;
-    }
+        // Level 10 - First challenging level
+        this.levels.set(10, {
+            platforms: [
+                ['platform', 0, 1, 5],
+                ['glass', 3, 2, 8],
+                ['ice', -2, 3, 12],
+                ['platform', 4, 4, 15]
+            ],
+            obstacles: [
+                ['spike', 2, 1, 7],
+                ['cannon', -3, 2, 10, { direction: 'right' }]
+            ]
+        });
 
-    createSpike(position) {
-        const spike = new THREE.Mesh(
-            new THREE.ConeGeometry(0.5, 1, 4),
-            new THREE.MeshPhongMaterial({ color: 0xff0000 })
-        );
-        spike.position.copy(position);
-        spike.rotation.x = Math.PI;
-        return spike;
-    }
+        // Level 25 - Mid-game challenge
+        this.levels.set(25, {
+            platforms: [
+                ['platform', 0, 1, 5],
+                ['glass', 4, 3, 8],
+                ['ice', -3, 4, 12],
+                ['leaves', 2, 5, 15],
+                ['platform', 5, 6, 18]
+            ],
+            obstacles: [
+                ['spike', 2, 1, 7],
+                ['cannon', -3, 2, 10, { direction: 'right' }],
+                ['cannon', 3, 4, 14, { direction: 'left' }]
+            ]
+        });
 
-    createIceBlock(position) {
-        const ice = new THREE.Mesh(
-            new THREE.BoxGeometry(2, 0.5, 2),
-            new THREE.MeshPhongMaterial({
-                color: 0xadd8e6,
-                transparent: true,
-                opacity: 0.8
-            })
-        );
-        ice.position.copy(position);
-        return ice;
+        // Level 50 - Final challenge
+        this.levels.set(50, {
+            platforms: [
+                ['platform', 0, 1, 5],
+                ['glass', 4, 3, 8],
+                ['ice', -3, 5, 12],
+                ['leaves', 2, 7, 15],
+                ['glass', 5, 8, 18],
+                ['platform', 0, 10, 22]
+            ],
+            obstacles: [
+                ['spike', 2, 1, 7],
+                ['cannon', -3, 2, 10, { direction: 'right' }],
+                ['cannon', 3, 4, 14, { direction: 'left' }],
+                ['spike', -2, 6, 16],
+                ['cannon', 4, 7, 19, { direction: 'up' }]
+            ]
+        });
     }
 
     updateAI() {
@@ -476,55 +608,42 @@ class ParkourGame {
     }
 
     updateCamera() {
-        // Smooth camera rotation
-        this.cameraRotation.x += (this.targetCameraRotation.x - this.cameraRotation.x) * this.cameraSmoothness;
-        this.cameraRotation.y += (this.targetCameraRotation.y - this.cameraRotation.y) * this.cameraSmoothness;
-        
-        // Smooth camera zoom
-        this.cameraDistance += (this.targetCameraDistance - this.cameraDistance) * this.zoomSmoothness;
-        
-        // Calculate camera position with smooth interpolation
-        const horizontalDistance = this.cameraDistance * Math.cos(this.cameraRotation.x);
-        const verticalDistance = this.cameraDistance * Math.sin(this.cameraRotation.x);
-        
-        // Target position (where we want the camera to look at)
-        const targetPos = new THREE.Vector3(
-            this.player.position.x,
-            this.player.position.y + 2,
-            this.player.position.z
+        // Calculate camera position based on player position and camera angle
+        const cameraOffset = new THREE.Vector3(
+            Math.sin(this.cameraAngle) * this.cameraDistance,
+            this.cameraHeight,
+            Math.cos(this.cameraAngle) * this.cameraDistance
         );
         
-        // Calculate desired camera position
-        const desiredPos = new THREE.Vector3(
-            targetPos.x + horizontalDistance * Math.sin(this.cameraRotation.y),
-            targetPos.y + verticalDistance,
-            targetPos.z + horizontalDistance * Math.cos(this.cameraRotation.y)
-        );
-        
-        // Smoothly move camera to desired position
-        this.camera.position.lerp(desiredPos, this.cameraSmoothness);
-        
-        // Smoothly look at target
-        const currentLookAt = new THREE.Vector3();
-        this.camera.getWorldDirection(currentLookAt);
-        const targetLookAt = targetPos.clone().sub(this.camera.position).normalize();
-        
-        const newLookAt = currentLookAt.lerp(targetLookAt, this.cameraSmoothness);
-        this.camera.lookAt(this.camera.position.clone().add(newLookAt));
-
-        // Update player movement direction based on camera rotation
-        this.updatePlayerMovement();
+        // Set camera position relative to player
+        this.camera.position.copy(this.player.position).add(cameraOffset);
+        this.camera.lookAt(this.player.position);
     }
 
     updatePlayerMovement() {
         if (this.moveDirection.length() > 0) {
-            // Calculate movement direction relative to camera rotation
-            const angle = this.cameraRotation.y;
-            const moveX = this.moveDirection.x * Math.cos(angle) - this.moveDirection.z * Math.sin(angle);
-            const moveZ = this.moveDirection.x * Math.sin(angle) + this.moveDirection.z * Math.cos(angle);
+            // Calculate movement direction relative to camera angle
+            const moveVector = new THREE.Vector3();
             
-            this.velocity.x = moveX * this.moveSpeed;
-            this.velocity.z = moveZ * this.moveSpeed;
+            // Forward/backward movement
+            if (this.moveDirection.z !== 0) {
+                moveVector.x += Math.sin(this.cameraAngle) * -this.moveDirection.z;
+                moveVector.z += Math.cos(this.cameraAngle) * -this.moveDirection.z;
+            }
+            
+            // Left/right movement
+            if (this.moveDirection.x !== 0) {
+                moveVector.x += Math.cos(this.cameraAngle) * this.moveDirection.x;
+                moveVector.z += -Math.sin(this.cameraAngle) * this.moveDirection.x;
+            }
+            
+            moveVector.normalize().multiplyScalar(this.moveSpeed);
+            
+            this.velocity.x = moveVector.x;
+            this.velocity.z = moveVector.z;
+        } else {
+            this.velocity.x = 0;
+            this.velocity.z = 0;
         }
     }
 
@@ -541,6 +660,184 @@ class ParkourGame {
                 requestAnimationFrame(shake.bind(this));
             }
         }.bind(this));
+    }
+
+    createFinishBlock(position) {
+        const geometry = new THREE.BoxGeometry(2, 0.5, 2);
+        const material = new THREE.MeshPhongMaterial({
+            color: 0xffd700,
+            emissive: 0xffd700,
+            emissiveIntensity: 0.5
+        });
+        
+        this.finishBlock = new THREE.Mesh(geometry, material);
+        this.finishBlock.position.copy(position);
+        this.finishBlock.userData.type = 'finish';
+        
+        // Add particle effect
+        const particles = new THREE.Points(
+            new THREE.BufferGeometry(),
+            new THREE.PointsMaterial({
+                color: 0xffd700,
+                size: 0.1,
+                transparent: true,
+                opacity: 0.6
+            })
+        );
+        
+        // Create floating particles
+        const particlePositions = [];
+        for (let i = 0; i < 50; i++) {
+            particlePositions.push(
+                Math.random() * 2 - 1,
+                Math.random() * 1,
+                Math.random() * 2 - 1
+            );
+        }
+        particles.geometry.setAttribute('position', 
+            new THREE.Float32BufferAttribute(particlePositions, 3)
+        );
+        
+        this.finishBlock.add(particles);
+        this.scene.add(this.finishBlock);
+    }
+
+    handleLevelComplete() {
+        if (!this.levelCompleted) {
+            this.levelCompleted = true;
+            
+            // Save best time
+            const currentTime = this.timer;
+            if (currentTime < this.bestTimes[this.currentLevel - 1]) {
+                this.bestTimes[this.currentLevel - 1] = currentTime;
+                document.getElementById('best-time').textContent = 
+                    `Best Time: ${Math.floor(currentTime / 60)}:${(currentTime % 60).toFixed(2)}`;
+            }
+
+            // Show level complete message
+            const message = document.createElement('div');
+            message.className = 'level-complete';
+            message.textContent = `Level ${this.currentLevel} Complete!`;
+            document.body.appendChild(message);
+
+            // Progress to next level after delay
+            setTimeout(() => {
+                document.body.removeChild(message);
+                this.currentLevel++;
+                if (this.currentLevel <= this.maxLevels) {
+                    this.loadLevel(this.currentLevel);
+                } else {
+                    this.showGameComplete();
+                }
+                this.levelCompleted = false;
+            }, 2000);
+        }
+    }
+
+    createLevel(levelNumber) {
+        // ... existing level creation code ...
+
+        // Add finish block at the end of the level
+        const finishPosition = new THREE.Vector3(
+            0,
+            Math.random() * 2 + 1,
+            20 + (levelNumber * 2) // Increases distance with level
+        );
+        this.createFinishBlock(finishPosition);
+    }
+}
+
+// AI Implementation
+class AIPlayer {
+    constructor(game) {
+        this.game = game;
+        this.position = new THREE.Vector3();
+        this.velocity = new THREE.Vector3();
+        this.target = null;
+        this.moveSpeed = 0.12; // Slightly slower than player
+        this.jumpForce = 0.3;
+        this.isGrounded = false;
+        
+        this.createAIModel();
+    }
+
+    createAIModel() {
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        const material = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+        this.model = new THREE.Mesh(geometry, material);
+        this.model.castShadow = true;
+        this.game.scene.add(this.model);
+    }
+
+    update() {
+        // Find next platform or target
+        if (!this.target || this.reachedTarget()) {
+            this.findNewTarget();
+        }
+
+        if (this.target) {
+            // Calculate direction to target
+            const direction = this.target.clone().sub(this.position).normalize();
+            
+            // Move towards target
+            this.velocity.x = direction.x * this.moveSpeed;
+            this.velocity.z = direction.z * this.moveSpeed;
+
+            // Jump if needed
+            if (this.isGrounded && this.target.y > this.position.y + 0.5) {
+                this.velocity.y = this.jumpForce;
+                this.isGrounded = false;
+            }
+
+            // Apply gravity
+            if (!this.isGrounded) {
+                this.velocity.y += this.game.gravity;
+            }
+
+            // Update position
+            this.position.add(this.velocity);
+            this.model.position.copy(this.position);
+
+            // Ground check
+            if (this.position.y <= 0) {
+                this.position.y = 0;
+                this.velocity.y = 0;
+                this.isGrounded = true;
+            }
+        }
+    }
+
+    findNewTarget() {
+        // Find nearest platform that's higher or further in the level
+        let nearestPlatform = null;
+        let minDistance = Infinity;
+
+        for (const obstacle of this.game.obstacles) {
+            if (obstacle.userData.type === 'platform' || obstacle.userData.type === 'glass') {
+                const distance = this.position.distanceTo(obstacle.position);
+                if (distance < minDistance && 
+                    (obstacle.position.z > this.position.z || 
+                     obstacle.position.y > this.position.y)) {
+                    nearestPlatform = obstacle;
+                    minDistance = distance;
+                }
+            }
+        }
+
+        if (nearestPlatform) {
+            this.target = nearestPlatform.position.clone();
+        }
+    }
+
+    reachedTarget() {
+        return this.target && this.position.distanceTo(this.target) < 1;
+    }
+
+    reset() {
+        this.position.set(2, 0, 0); // Start slightly to the right of player
+        this.velocity.set(0, 0, 0);
+        this.target = null;
+        this.model.position.copy(this.position);
     }
 }
 
