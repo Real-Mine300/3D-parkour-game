@@ -56,14 +56,18 @@ class ParkourGame {
         this.cameraDistance = 10;
         this.rotationSpeed = 0.03;
         
-        // Movement settings
+        // Update movement settings
         this.moveDirection = new THREE.Vector3();
-        this.baseSpeed = 0.15;
+        this.velocity = new THREE.Vector3();
+        this.baseSpeed = 0.3; // Increased speed
         this.moveSpeed = this.baseSpeed;
         this.sprintSpeed = this.baseSpeed * 1.8;
+        this.gravity = -0.015;
+        this.jumpForce = 0.3;
+        this.isGrounded = false;
         this.isShifting = false;
         this.lastWPress = 0;
-        this.platformFriction = 0.98; // Slight slip effect
+        this.platformFriction = 0.98;
         
         // Finish block
         this.finishBlock = null;
@@ -114,7 +118,6 @@ class ParkourGame {
     }
 
     setupControls() {
-        // Key highlighting function
         const updateKeyPress = (key, isPressed) => {
             const keyElements = document.querySelectorAll(`.key[data-key="${key}"]`);
             keyElements.forEach(element => {
@@ -129,18 +132,10 @@ class ParkourGame {
         document.addEventListener('keydown', (e) => {
             if (!this.isPlaying) return;
             
-            const key = e.key.toLowerCase();
-            updateKeyPress(key, true);
-            
-            switch(key) {
-                case ' ':
-                    if (this.isGrounded) {
-                        this.jump();
-                        updateKeyPress('space', true);
-                    }
-                    break;
+            switch(e.key.toLowerCase()) {
                 case 'w':
-                    this.moveDirection.z = -1;
+                    this.moveDirection.z = 1;
+                    updateKeyPress('w', true);
                     const now = Date.now();
                     if (now - this.lastWPress < 300) {
                         this.moveSpeed = this.sprintSpeed;
@@ -148,51 +143,65 @@ class ParkourGame {
                     this.lastWPress = now;
                     break;
                 case 's':
-                    this.moveDirection.z = 1;
+                    this.moveDirection.z = -1;
+                    updateKeyPress('s', true);
                     break;
                 case 'a':
                     this.moveDirection.x = -1;
+                    updateKeyPress('a', true);
                     break;
                 case 'd':
                     this.moveDirection.x = 1;
+                    updateKeyPress('d', true);
+                    break;
+                case ' ':
+                    if (this.isGrounded) {
+                        this.jump();
+                        updateKeyPress('space', true);
+                    }
                     break;
                 case 'shift':
                     this.isShifting = true;
-                    this.moveSpeed = this.baseSpeed * 0.5;
+                    updateKeyPress('shift', true);
                     break;
                 case 'arrowleft':
-                    updateKeyPress('left', true);
                     this.cameraAngle += this.rotationSpeed;
+                    updateKeyPress('left', true);
                     break;
                 case 'arrowright':
-                    updateKeyPress('right', true);
                     this.cameraAngle -= this.rotationSpeed;
+                    updateKeyPress('right', true);
                     break;
             }
         });
 
         document.addEventListener('keyup', (e) => {
-            const key = e.key.toLowerCase();
-            updateKeyPress(key, false);
-            
-            switch(key) {
-                case ' ':
-                    updateKeyPress('space', false);
-                    break;
+            switch(e.key.toLowerCase()) {
                 case 'w':
-                case 's':
                     this.moveDirection.z = 0;
+                    updateKeyPress('w', false);
                     if (this.moveSpeed === this.sprintSpeed) {
                         this.moveSpeed = this.baseSpeed;
                     }
                     break;
+                case 's':
+                    this.moveDirection.z = 0;
+                    updateKeyPress('s', false);
+                    break;
                 case 'a':
+                    this.moveDirection.x = 0;
+                    updateKeyPress('a', false);
+                    break;
                 case 'd':
                     this.moveDirection.x = 0;
+                    updateKeyPress('d', false);
+                    break;
+                case ' ':
+                    updateKeyPress('space', false);
                     break;
                 case 'shift':
                     this.isShifting = false;
-                    this.moveSpeed = this.baseSpeed;
+                    updateKeyPress('shift', false);
                     break;
                 case 'arrowleft':
                     updateKeyPress('left', false);
@@ -280,8 +289,25 @@ class ParkourGame {
         this.isPlaying = true;
         this.timer = 0;
         this.deaths = 0;
+        this.currentLevel = 1;
         this.loadLevel(1);
+        
+        // Hide menu
         document.getElementById('menu').style.display = 'none';
+        
+        // Reset player position
+        this.player.position.set(0, 0, 0);
+        this.velocity.set(0, 0, 0);
+        
+        // Create AI if enabled
+        if (this.useAI && !this.aiPlayer) {
+            this.aiPlayer = new AIPlayer(this);
+        }
+        
+        // Update HUD
+        document.getElementById('deaths').textContent = `Deaths: ${this.deaths}`;
+        document.getElementById('level').textContent = `Level: ${this.currentLevel}`;
+        document.getElementById('timer').textContent = 'Time: 0:00';
     }
 
     toggleAI() {
@@ -305,44 +331,73 @@ class ParkourGame {
     }
 
     updatePhysics() {
-        // Apply gravity if not grounded
-        if (!this.isGrounded) {
-            this.velocity.y += this.gravity;
+        // Apply gravity
+        this.velocity.y += this.gravity;
+        
+        // Handle movement
+        const moveSpeed = this.isShifting ? this.baseSpeed * 0.5 : this.moveSpeed;
+        
+        // Reset horizontal velocity
+        this.velocity.x = 0;
+        this.velocity.z = 0;
+        
+        // Calculate movement based on camera angle
+        if (this.moveDirection.x !== 0 || this.moveDirection.z !== 0) {
+            // Forward/Backward
+            if (this.moveDirection.z !== 0) {
+                this.velocity.x -= Math.sin(this.cameraAngle) * this.moveDirection.z * moveSpeed;
+                this.velocity.z -= Math.cos(this.cameraAngle) * this.moveDirection.z * moveSpeed;
+            }
+            
+            // Left/Right
+            if (this.moveDirection.x !== 0) {
+                this.velocity.x += Math.cos(this.cameraAngle) * this.moveDirection.x * moveSpeed;
+                this.velocity.z -= Math.sin(this.cameraAngle) * this.moveDirection.x * moveSpeed;
+            }
         }
         
-        // Platform physics and collision detection
-        let onPlatform = false;
-        let currentPlatform = null;
+        // Update position
+        this.player.position.add(this.velocity);
         
+        // Ground check
+        if (this.player.position.y <= 0) {
+            this.player.position.y = 0;
+            this.velocity.y = 0;
+            this.isGrounded = true;
+        }
+
+        // Update camera
+        this.updateCamera();
+        
+        // Update AI if active
+        if (this.useAI && this.aiPlayer) {
+            this.aiPlayer.update();
+        }
+    }
+
+    checkCollisions() {
+        this.isGrounded = false;
+        
+        // Check floor collision
+        if (this.player.position.y <= 0) {
+            this.player.position.y = 0;
+            this.velocity.y = 0;
+            this.isGrounded = true;
+        }
+        
+        // Check platform collisions
         for (const obstacle of this.obstacles) {
-            if (this.checkCollision(this.player, obstacle)) {
+            const box = new THREE.Box3().setFromObject(obstacle);
+            const playerBox = new THREE.Box3().setFromObject(this.player);
+            
+            if (box.intersectsBox(playerBox)) {
                 switch(obstacle.userData.type) {
                     case 'platform':
-                        if (this.velocity.y <= 0) {
-                            onPlatform = true;
-                            currentPlatform = obstacle;
-                            if (!this.isShifting) {
-                                // Apply platform slipperiness
-                                this.velocity.x *= this.platformFriction;
-                                this.velocity.z *= this.platformFriction;
-                            }
-                        }
-                        break;
-                    case 'glass':
-                        if (this.velocity.y < -0.2) {
-                            this.scene.remove(obstacle);
-                            this.obstacles = this.obstacles.filter(o => o !== obstacle);
-                        } else if (!this.isShifting) {
-                            onPlatform = true;
-                        }
-                        break;
-                    case 'leaves':
-                        // Always fall through leaves when standing still
-                        if (this.velocity.length() < 0.1) {
-                            setTimeout(() => {
-                                onPlatform = false;
-                                this.isGrounded = false;
-                            }, 500);
+                        if (this.velocity.y <= 0 && 
+                            this.player.position.y > obstacle.position.y) {
+                            this.player.position.y = obstacle.position.y + 1;
+                            this.velocity.y = 0;
+                            this.isGrounded = true;
                         }
                         break;
                     case 'finish':
@@ -351,67 +406,13 @@ class ParkourGame {
                 }
             }
         }
-
-        // Update grounded state
-        this.isGrounded = onPlatform || this.player.position.y <= 0;
-
-        // Apply movement
-        this.player.position.add(this.velocity);
-
-        // Ground check and void death
-        if (this.player.position.y <= 0) {
-            this.player.position.y = 0;
-            this.velocity.y = 0;
-            this.isGrounded = true;
-        } else if (this.player.position.y < -10) {
-            this.handleDeath();
-        }
-
-        // Update camera
-        this.updateCamera();
-    }
-
-    checkCollisions() {
-        // Check obstacle collisions
-        for (const obstacle of this.obstacles) {
-            if (this.checkCollision(this.player, obstacle)) {
-                switch(obstacle.userData.type) {
-                    case 'spike':
-                        this.handleDeath();
-                        break;
-                    case 'glass':
-                        if (this.velocity.y < -0.2) {
-                            this.scene.remove(obstacle);
-                            this.obstacles = this.obstacles.filter(o => o !== obstacle);
-                        }
-                        break;
-                    case 'ice':
-                        this.moveSpeed = 0.05; // Reduced control on ice
-                        break;
-                    default:
-                        this.moveSpeed = 0.1; // Normal control
-                        break;
-                }
-            }
-        }
-
-        // Check void death
-        if (this.player.position.y < -10) {
-            this.handleDeath();
-        }
-    }
-
-    checkCollision(obj1, obj2) {
-        const box1 = new THREE.Box3().setFromObject(obj1);
-        const box2 = new THREE.Box3().setFromObject(obj2);
-        return box1.intersectsBox(box2);
     }
 
     handleDeath() {
         this.deaths++;
+        document.getElementById('deaths').textContent = `Deaths: ${this.deaths}`;
         this.player.position.set(0, 0, 0);
         this.velocity.set(0, 0, 0);
-        document.getElementById('deaths').textContent = `Deaths: ${this.deaths}`;
     }
 
     updateTimer() {
@@ -611,6 +612,12 @@ class ParkourGame {
         // Set camera position relative to player
         this.camera.position.copy(this.player.position).add(cameraOffset);
         this.camera.lookAt(this.player.position);
+        
+        // Rotate player model to face movement direction
+        if (this.moveDirection.length() > 0) {
+            const angle = Math.atan2(this.velocity.x, this.velocity.z);
+            this.player.rotation.y = angle;
+        }
     }
 
     updatePlayerMovement() {
@@ -658,32 +665,11 @@ class ParkourGame {
     handleLevelComplete() {
         if (!this.levelCompleted) {
             this.levelCompleted = true;
-            
-            // Save best time
-            const currentTime = this.timer;
-            if (currentTime < this.bestTimes[this.currentLevel - 1]) {
-                this.bestTimes[this.currentLevel - 1] = currentTime;
-                document.getElementById('best-time').textContent = 
-                    `Best Time: ${Math.floor(currentTime / 60)}:${(currentTime % 60).toFixed(2)}`;
-            }
-
-            // Show level complete message
-            const message = document.createElement('div');
-            message.className = 'level-complete';
-            message.textContent = `Level ${this.currentLevel} Complete!`;
-            document.body.appendChild(message);
-
-            // Progress to next level after delay
+            this.currentLevel++;
             setTimeout(() => {
-                document.body.removeChild(message);
-                this.currentLevel++;
-                if (this.currentLevel <= this.maxLevels) {
-                    this.loadLevel(this.currentLevel);
-                } else {
-                    this.showGameComplete();
-                }
+                this.loadLevel(this.currentLevel);
                 this.levelCompleted = false;
-            }, 2000);
+            }, 1000);
         }
     }
 }
@@ -694,10 +680,10 @@ class AIPlayer {
         this.game = game;
         this.position = new THREE.Vector3();
         this.velocity = new THREE.Vector3();
-        this.target = null;
-        this.moveSpeed = 0.12; // Slightly slower than player
+        this.moveSpeed = 0.12;
         this.jumpForce = 0.3;
         this.isGrounded = false;
+        this.target = null;
         
         this.createAIModel();
     }
@@ -711,35 +697,24 @@ class AIPlayer {
     }
 
     update() {
-        // Find next platform or target
         if (!this.target || this.reachedTarget()) {
             this.findNewTarget();
         }
 
         if (this.target) {
-            // Calculate direction to target
             const direction = this.target.clone().sub(this.position).normalize();
-            
-            // Move towards target
             this.velocity.x = direction.x * this.moveSpeed;
             this.velocity.z = direction.z * this.moveSpeed;
 
-            // Jump if needed
             if (this.isGrounded && this.target.y > this.position.y + 0.5) {
                 this.velocity.y = this.jumpForce;
                 this.isGrounded = false;
             }
 
-            // Apply gravity
-            if (!this.isGrounded) {
-                this.velocity.y += this.game.gravity;
-            }
-
-            // Update position
+            this.velocity.y += this.game.gravity;
             this.position.add(this.velocity);
             this.model.position.copy(this.position);
 
-            // Ground check
             if (this.position.y <= 0) {
                 this.position.y = 0;
                 this.velocity.y = 0;
@@ -749,16 +724,15 @@ class AIPlayer {
     }
 
     findNewTarget() {
-        // Find nearest platform that's higher or further in the level
         let nearestPlatform = null;
         let minDistance = Infinity;
 
         for (const obstacle of this.game.obstacles) {
-            if (obstacle.userData.type === 'platform' || obstacle.userData.type === 'glass') {
+            if (obstacle.userData.type === 'platform' || 
+                obstacle.userData.type === 'finish') {
                 const distance = this.position.distanceTo(obstacle.position);
                 if (distance < minDistance && 
-                    (obstacle.position.z > this.position.z || 
-                     obstacle.position.y > this.position.y)) {
+                    obstacle.position.z > this.position.z) {
                     nearestPlatform = obstacle;
                     minDistance = distance;
                 }
@@ -775,7 +749,7 @@ class AIPlayer {
     }
 
     reset() {
-        this.position.set(2, 0, 0); // Start slightly to the right of player
+        this.position.set(2, 0, 0);
         this.velocity.set(0, 0, 0);
         this.target = null;
         this.model.position.copy(this.position);
