@@ -49,4 +49,46 @@ button {
 @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
+}
+
+#controls-display {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 15px;
+    border-radius: 8px;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    z-index: 1000;
+}
+
+.control-row {
+    margin: 5px 0;
+    display: flex;
+    align-items: center;
+}
+
+.key {
+    background-color: #444;
+    border: 1px solid #666;
+    border-radius: 4px;
+    padding: 3px 8px;
+    margin-right: 10px;
+    min-width: 20px;
+    text-align: center;
+    display: inline-block;
+    transition: all 0.1s ease;
+}
+
+.key.pressed {
+    background-color: #8BC34A;
+    border-color: #689F38;
+    transform: scale(0.95);
+    box-shadow: 0 0 5px rgba(139, 195, 74, 0.5);
+}
+
+.description {
+    color: #ccc;
 } 
