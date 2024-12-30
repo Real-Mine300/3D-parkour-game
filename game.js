@@ -479,6 +479,12 @@ class ParkourGame {
     }
 
     createLevel(levelNumber) {
+        // Clear existing level
+        while(this.obstacles.length > 0) {
+            const obstacle = this.obstacles.pop();
+            this.scene.remove(obstacle);
+        }
+
         // Create floor
         const floor = new THREE.Mesh(
             new THREE.BoxGeometry(100, 1, 100),
@@ -489,34 +495,85 @@ class ParkourGame {
         this.scene.add(floor);
 
         // Calculate difficulty factors
-        const difficulty = Math.min(levelNumber / 10, 1); // 0-1 scale
+        const difficulty = Math.min(levelNumber / 20, 1); // Scaled to reach max at level 20
         const platformCount = Math.floor(5 + (levelNumber * 0.5));
 
         // Add platforms with increasing complexity
         for (let i = 0; i < platformCount; i++) {
-            const platform = new THREE.Mesh(
-                new THREE.BoxGeometry(2, 0.5, 2),
-                new THREE.MeshPhongMaterial({ color: 0x8b4513 })
+            let platformType = 'normal';
+            
+            // Determine platform type based on level
+            if (levelNumber >= 5) {
+                const rand = Math.random();
+                if (levelNumber >= 15 && rand < 0.2) {
+                    platformType = 'leaves';
+                } else if (levelNumber >= 10 && rand < 0.3) {
+                    platformType = 'ice';
+                } else if (levelNumber >= 5 && rand < 0.4) {
+                    platformType = 'glass';
+                }
+            }
+
+            const platform = this.createPlatform(
+                new THREE.Vector3(
+                    Math.random() * 16 - 8,
+                    i * 2 + 1,
+                    5 + i * 3 + Math.random() * 2
+                ),
+                platformType
             );
-            platform.position.set(
-                Math.random() * 10 - 5,
-                i * 2 + 1,
-                Math.random() * 10 - 5
-            );
-            platform.castShadow = true;
-            platform.receiveShadow = true;
-            platform.userData.type = 'platform';
+            
             this.obstacles.push(platform);
-            this.scene.add(platform);
         }
 
         // Add finish block
         const finishPosition = new THREE.Vector3(
             0,
             platformCount * 2,
-            10
+            15 + platformCount * 3
         );
         this.createFinishBlock(finishPosition);
+    }
+
+    createPlatform(position, type = 'normal') {
+        let material;
+        switch(type) {
+            case 'glass':
+                material = new THREE.MeshPhongMaterial({
+                    color: 0x88ccff,
+                    transparent: true,
+                    opacity: 0.3
+                });
+                break;
+            case 'ice':
+                material = new THREE.MeshPhongMaterial({
+                    color: 0xaaddff,
+                    shininess: 100
+                });
+                break;
+            case 'leaves':
+                material = new THREE.MeshPhongMaterial({
+                    color: 0x33aa33
+                });
+                break;
+            default:
+                material = new THREE.MeshPhongMaterial({
+                    color: 0x8b4513
+                });
+        }
+
+        const platform = new THREE.Mesh(
+            new THREE.BoxGeometry(2, 0.5, 2),
+            material
+        );
+        
+        platform.position.copy(position);
+        platform.castShadow = true;
+        platform.receiveShadow = true;
+        platform.userData.type = type;
+        
+        this.scene.add(platform);
+        return platform;
     }
 
     createFinishBlock(position) {
@@ -727,68 +784,121 @@ class AIPlayer {
         this.game = game;
         this.position = new THREE.Vector3();
         this.velocity = new THREE.Vector3();
-        this.moveSpeed = 0.12;
-        this.jumpForce = 0.3;
+        this.moveSpeed = 0.15;
+        this.jumpForce = 0.35;
         this.isGrounded = false;
         this.target = null;
+        this.pathPoints = [];
+        this.currentPathIndex = 0;
         
         this.createAIModel();
     }
 
     createAIModel() {
         const geometry = new THREE.BoxGeometry(1, 1, 1);
-        const material = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+        const material = new THREE.MeshPhongMaterial({ 
+            color: 0xff0000,
+            emissive: 0x330000
+        });
         this.model = new THREE.Mesh(geometry, material);
         this.model.castShadow = true;
         this.game.scene.add(this.model);
     }
 
     update() {
+        // Apply gravity
+        this.velocity.y += this.game.gravity;
+
         if (!this.target || this.reachedTarget()) {
             this.findNewTarget();
         }
 
         if (this.target) {
-            const direction = this.target.clone().sub(this.position).normalize();
+            // Calculate direction to target
+            const direction = new THREE.Vector3();
+            direction.subVectors(this.target, this.position).normalize();
+
+            // Horizontal movement
             this.velocity.x = direction.x * this.moveSpeed;
             this.velocity.z = direction.z * this.moveSpeed;
 
+            // Jump if needed
             if (this.isGrounded && this.target.y > this.position.y + 0.5) {
                 this.velocity.y = this.jumpForce;
                 this.isGrounded = false;
             }
-
-            this.velocity.y += this.game.gravity;
-            this.position.add(this.velocity);
-            this.model.position.copy(this.position);
-
-            if (this.position.y <= 0) {
-                this.position.y = 0;
-                this.velocity.y = 0;
-                this.isGrounded = true;
-            }
         }
+
+        // Update position
+        this.position.add(this.velocity);
+        this.model.position.copy(this.position);
+
+        // Check collisions
+        this.checkCollisions();
     }
 
-    findNewTarget() {
-        let nearestPlatform = null;
-        let minDistance = Infinity;
+    checkCollisions() {
+        this.isGrounded = false;
+        const aiBox = new THREE.Box3().setFromObject(this.model);
 
         for (const obstacle of this.game.obstacles) {
-            if (obstacle.userData.type === 'platform' || 
-                obstacle.userData.type === 'finish') {
-                const distance = this.position.distanceTo(obstacle.position);
-                if (distance < minDistance && 
-                    obstacle.position.z > this.position.z) {
-                    nearestPlatform = obstacle;
-                    minDistance = distance;
+            const obstacleBox = new THREE.Box3().setFromObject(obstacle);
+            
+            if (aiBox.intersectsBox(obstacleBox)) {
+                if (this.velocity.y <= 0 && this.position.y > obstacle.position.y) {
+                    this.position.y = obstacle.position.y + 1;
+                    this.velocity.y = 0;
+                    this.isGrounded = true;
                 }
             }
         }
 
-        if (nearestPlatform) {
-            this.target = nearestPlatform.position.clone();
+        // Floor collision
+        if (this.position.y <= 0) {
+            this.position.y = 0;
+            this.velocity.y = 0;
+            this.isGrounded = true;
         }
+
+        // Void death
+        if (this.position.y < -10) {
+            this.reset();
+        }
+    }
+
+    findNewTarget() {
+        let bestTarget = null;
+        let bestScore = -Infinity;
+
+        for (const obstacle of this.game.obstacles) {
+            if (obstacle.userData.type === 'finish') {
+                bestTarget = obstacle.position.clone();
+                break;
+            }
+
+            const score = this.evaluateTarget(obstacle.position);
+            if (score > bestScore) {
+                bestScore = score;
+                bestTarget = obstacle.position.clone();
+            }
+        }
+
+        if (bestTarget) {
+            this.target = bestTarget.add(new THREE.Vector3(0, 1, 0));
+        }
+    }
+
+    evaluateTarget(position) {
+        // Score based on progress towards finish
+        let score = position.z * 2;
+        
+        // Bonus for height gain (but not too much)
+        score += Math.min(position.y - this.position.y, 5) * 1.5;
+        
+        // Penalty for distance from current position
+        score -= this.position.distanceTo(position) * 0.5;
+        
+        return score;
     }
 
     reachedTarget() {
