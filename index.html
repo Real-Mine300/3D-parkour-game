@@ -16,8 +16,59 @@
             <button id="start-game">Start Game</button>
             <button id="toggle-ai">Play Against AI</button>
         </div>
+        <div id="controls-display">
+            <div class="control-row">
+                <span class="key" data-key="w">W</span>
+                <span class="description">Move Forward</span>
+            </div>
+            <div class="control-row">
+                <span class="key" data-key="s">S</span>
+                <span class="description">Move Backward</span>
+            </div>
+            <div class="control-row">
+                <span class="key" data-key="a">A</span>
+                <span class="description">Move Left</span>
+            </div>
+            <div class="control-row">
+                <span class="key" data-key="d">D</span>
+                <span class="description">Move Right</span>
+            </div>
+            <div class="control-row">
+                <span class="key" data-key="space">SPACE</span>
+                <span class="description">Jump</span>
+            </div>
+            <div class="control-row">
+                <span class="key" data-key="shift">SHIFT</span>
+                <span class="description">Walk Carefully</span>
+            </div>
+            <div class="control-row">
+                <span class="key" data-key="w">W</span>
+                <span class="key" data-key="w">W</span>
+                <span class="description">Sprint (Double Tap)</span>
+            </div>
+            <div class="control-row">
+                <span class="key" data-key="left">←</span>
+                <span class="key" data-key="right">→</span>
+                <span class="description">Rotate Camera</span>
+            </div>
+        </div>
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="game.js"></script>
+    <script>
+        // Initialize the game when the window loads
+        window.addEventListener('load', () => {
+            const game = new ParkourGame();
+            
+            // Add event listeners for the menu buttons
+            document.getElementById('start-game').addEventListener('click', () => {
+                game.startGame();
+            });
+            
+            document.getElementById('toggle-ai').addEventListener('click', () => {
+                game.toggleAI();
+            });
+        });
+    </script>
 </body>
 </html> 
