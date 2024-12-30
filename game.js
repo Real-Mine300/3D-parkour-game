@@ -770,6 +770,17 @@ class ParkourGame {
         );
         this.createFinishBlock(finishPosition);
     }
+
+    createFloor() {
+        const floor = new THREE.Mesh(
+            new THREE.BoxGeometry(100, 1, 100),
+            new THREE.MeshPhongMaterial({ color: 0x808080 })
+        );
+        floor.position.y = -0.5;
+        floor.receiveShadow = true;
+        this.scene.add(floor);
+        return floor;
+    }
 }
 
 // AI Implementation
