@@ -359,13 +359,9 @@ class ParkourGame {
         // Update position
         this.player.position.add(this.velocity);
         
-        // Ground check
-        if (this.player.position.y <= 0) {
-            this.player.position.y = 0;
-            this.velocity.y = 0;
-            this.isGrounded = true;
-        }
-
+        // Check collisions
+        this.checkCollisions();
+        
         // Update camera
         this.updateCamera();
         
@@ -377,34 +373,77 @@ class ParkourGame {
 
     checkCollisions() {
         this.isGrounded = false;
-        
-        // Check floor collision
-        if (this.player.position.y <= 0) {
-            this.player.position.y = 0;
-            this.velocity.y = 0;
-            this.isGrounded = true;
-        }
-        
-        // Check platform collisions
+
+        // Create player hitbox
+        const playerBox = new THREE.Box3().setFromObject(this.player);
+        const playerBottom = this.player.position.y - 0.5; // Bottom of player
+
+        // Check each obstacle
         for (const obstacle of this.obstacles) {
-            const box = new THREE.Box3().setFromObject(obstacle);
-            const playerBox = new THREE.Box3().setFromObject(this.player);
+            const obstacleBox = new THREE.Box3().setFromObject(obstacle);
             
-            if (box.intersectsBox(playerBox)) {
+            // Check if player is colliding with obstacle
+            if (playerBox.intersectsBox(obstacleBox)) {
                 switch(obstacle.userData.type) {
                     case 'platform':
-                        if (this.velocity.y <= 0 && 
-                            this.player.position.y > obstacle.position.y) {
+                        // Check if player is above platform
+                        if (this.velocity.y <= 0 && playerBottom >= obstacle.position.y) {
                             this.player.position.y = obstacle.position.y + 1;
                             this.velocity.y = 0;
                             this.isGrounded = true;
                         }
+                        // Side collisions
+                        else {
+                            const overlap = playerBox.intersect(obstacleBox);
+                            const overlapSize = new THREE.Vector3(
+                                overlap.max.x - overlap.min.x,
+                                overlap.max.y - overlap.min.y,
+                                overlap.max.z - overlap.min.z
+                            );
+
+                            // Push player out of the smallest overlap direction
+                            if (overlapSize.x < overlapSize.y && overlapSize.x < overlapSize.z) {
+                                const pushDirection = this.player.position.x > obstacle.position.x ? 1 : -1;
+                                this.player.position.x += overlapSize.x * pushDirection;
+                            } else if (overlapSize.z < overlapSize.y) {
+                                const pushDirection = this.player.position.z > obstacle.position.z ? 1 : -1;
+                                this.player.position.z += overlapSize.z * pushDirection;
+                            }
+                        }
                         break;
+
+                    case 'glass':
+                        if (this.velocity.y < -0.2) {
+                            // Break glass if falling fast enough
+                            this.scene.remove(obstacle);
+                            this.obstacles = this.obstacles.filter(o => o !== obstacle);
+                        } else if (!this.isShifting) {
+                            // Same collision as platform if not breaking
+                            if (this.velocity.y <= 0 && playerBottom >= obstacle.position.y) {
+                                this.player.position.y = obstacle.position.y + 1;
+                                this.velocity.y = 0;
+                                this.isGrounded = true;
+                            }
+                        }
+                        break;
+
                     case 'finish':
                         this.handleLevelComplete();
                         break;
                 }
             }
+        }
+
+        // Floor collision
+        if (this.player.position.y <= 0) {
+            this.player.position.y = 0;
+            this.velocity.y = 0;
+            this.isGrounded = true;
+        }
+
+        // Void death
+        if (this.player.position.y < -10) {
+            this.handleDeath();
         }
     }
 
@@ -666,10 +705,18 @@ class ParkourGame {
         if (!this.levelCompleted) {
             this.levelCompleted = true;
             this.currentLevel++;
+            
+            // Show level complete message
+            const message = document.createElement('div');
+            message.className = 'level-complete';
+            message.textContent = `Level ${this.currentLevel - 1} Complete!`;
+            document.body.appendChild(message);
+
             setTimeout(() => {
+                document.body.removeChild(message);
                 this.loadLevel(this.currentLevel);
                 this.levelCompleted = false;
-            }, 1000);
+            }, 1500);
         }
     }
 }
