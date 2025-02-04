@@ -322,13 +322,19 @@ class ParkourGame {
             });
         }
 
+        // Bind the event handlers to this instance
+        this.handleKeyDown = this.handleKeyDown.bind(this);
+        this.handleKeyUp = this.handleKeyUp.bind(this);
+        this.handleMouseMove = this.handleMouseMove.bind(this);
+        this.handleMouseWheel = this.handleMouseWheel.bind(this);
+
         // Add keyboard controls
-        document.addEventListener('keydown', (e) => this.handleKeyDown(e));
-        document.addEventListener('keyup', (e) => this.handleKeyUp(e));
+        document.addEventListener('keydown', this.handleKeyDown);
+        document.addEventListener('keyup', this.handleKeyUp);
         
         // Add mouse controls
-        document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-        document.addEventListener('wheel', (e) => this.handleMouseWheel(e));
+        document.addEventListener('mousemove', this.handleMouseMove);
+        document.addEventListener('wheel', this.handleMouseWheel);
     }
 
     startGame() {
@@ -538,16 +544,17 @@ class ParkourGame {
 
     loadLevel(levelNumber) {
         // Clear existing level
-        while(this.obstacles.length > 0) {
-            const obstacle = this.obstacles.pop();
-            this.scene.remove(obstacle);
-        }
-
+        this.clearLevel();
+        
         // Create new level
         this.createLevel(levelNumber);
         
-        // Update level display
-        document.getElementById('level').textContent = `Level: ${levelNumber}`;
+        // Update HUD safely
+        const levelElement = document.getElementById('level');
+        const deathsElement = document.getElementById('deaths');
+        
+        if (levelElement) levelElement.textContent = `Level: ${this.currentLevel}`;
+        if (deathsElement) deathsElement.textContent = `Deaths: ${this.deaths}`;
     }
 
     createLevel(levelNumber) {
@@ -673,8 +680,7 @@ class ParkourGame {
             case 'sticky':
                 material = new THREE.MeshPhongMaterial({
                     color: 0x8b4513,
-                    roughness: 1.0,
-                    metalness: 0.1
+                    shininess: 10
                 });
                 properties.friction = 2.0;
                 properties.climbable = true;
@@ -1232,6 +1238,87 @@ class ParkourGame {
     // Add method to update mouse sensitivity
     updateMouseSensitivity(value) {
         this.mouseSensitivity = value / 5000; // Convert slider value to usable sensitivity
+    }
+
+    handleMouseMove(e) {
+        if (!this.isPlaying) return;
+        
+        if (document.pointerLockElement === this.renderer.domElement) {
+            this.cameraAngle -= e.movementX * this.mouseSensitivity;
+            
+            // Update camera position
+            const cameraOffset = new THREE.Vector3(
+                Math.sin(this.cameraAngle) * this.cameraDistance,
+                this.cameraHeight,
+                Math.cos(this.cameraAngle) * this.cameraDistance
+            );
+            
+            this.camera.position.copy(this.player.position).add(cameraOffset);
+            this.camera.lookAt(this.player.position);
+        }
+    }
+
+    handleMouseWheel(e) {
+        if (!this.isPlaying) return;
+        
+        this.cameraDistance = Math.max(5, Math.min(15, 
+            this.cameraDistance + e.deltaY * 0.01
+        ));
+    }
+
+    handleKeyDown(e) {
+        if (!this.isPlaying) return;
+        
+        switch(e.key.toLowerCase()) {
+            case 'w':
+                this.moveDirection.z = 1;
+                const now = Date.now();
+                if (now - this.lastWPress < 300) { // Double tap detection
+                    this.moveSpeed = this.sprintSpeed;
+                }
+                this.lastWPress = now;
+                break;
+            case 's':
+                this.moveDirection.z = -1;
+                break;
+            case 'a':
+                this.moveDirection.x = -1;
+                break;
+            case 'd':
+                this.moveDirection.x = 1;
+                break;
+            case ' ':
+                this.jump();
+                break;
+            case 'shift':
+                this.isShifting = true;
+                break;
+        }
+    }
+
+    handleKeyUp(e) {
+        if (!this.isPlaying) return;
+        
+        switch(e.key.toLowerCase()) {
+            case 'w':
+                this.moveDirection.z = 0;
+                if (this.moveSpeed === this.sprintSpeed) {
+                    this.moveSpeed = this.baseSpeed;
+                }
+                break;
+            case 's':
+                this.moveDirection.z = 0;
+                break;
+            case 'a':
+                this.moveDirection.x = 0;
+                break;
+            case 'd':
+                this.moveDirection.x = 0;
+                break;
+            case 'shift':
+                this.isShifting = false;
+                break;
+        }
     }
 }
 
