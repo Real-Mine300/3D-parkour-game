@@ -7,14 +7,45 @@
 <body>
     <div id="game-container">
         <div id="hud">
-            <div id="timer">Time: 0:00</div>
-            <div id="deaths">Deaths: 0</div>
+            <div class="timer-section">
+                <div id="timer">Time: 0:00.00</div>
+                <div id="best-time">Best: --</div>
+            </div>
+            <div class="ai-section" style="display: none;">
+                <div id="ai-timer">AI Time: --</div>
+                <div id="ai-best-time">AI Best: --</div>
+                <div id="ai-difficulty-display"></div>
+            </div>
             <div id="level">Level: 1</div>
-            <div id="best-time">Best Time: --</div>
+            <div id="deaths">Deaths: 0</div>
         </div>
         <div id="menu">
-            <button id="start-game">Start Game</button>
-            <button id="toggle-ai">Play Against AI</button>
+            <h2>3D Parkour Game</h2>
+            
+            <div class="settings-section">
+                <h3>Settings</h3>
+                <div class="setting-item">
+                    <label for="mouse-sensitivity">Mouse Sensitivity:</label>
+                    <input type="range" id="mouse-sensitivity" 
+                           min="1" max="20" value="10" 
+                           class="slider">
+                    <span id="sensitivity-value">10</span>
+                </div>
+            </div>
+
+            <div class="ai-settings-section">
+                <h3>AI Options</h3>
+                <select id="ai-difficulty" class="setting-select">
+                    <option value="easy">Easy AI</option>
+                    <option value="medium" selected>Medium AI</option>
+                    <option value="hard">Hard AI</option>
+                    <option value="expert">Expert AI</option>
+                    <option value="perfect">Perfect AI</option>
+                </select>
+                <button id="toggle-ai" class="menu-button">Play Against AI</button>
+            </div>
+
+            <button id="start-game" class="menu-button primary">Start Game</button>
         </div>
         <div id="controls-display">
             <div class="control-row">
@@ -50,6 +81,28 @@
                 <span class="key" data-key="left">←</span>
                 <span class="key" data-key="right">→</span>
                 <span class="description">Rotate Camera</span>
+            </div>
+        </div>
+        <div id="ai-controls" class="control-panel">
+            <h3>AI Controls</h3>
+            <div class="ai-difficulty-selector">
+                <button id="toggle-ai" class="main-button">Play Against AI</button>
+                <select id="ai-difficulty" class="difficulty-select">
+                    <option value="easy">Easy AI</option>
+                    <option value="medium" selected>Medium AI</option>
+                    <option value="hard">Hard AI</option>
+                    <option value="perfect" disabled>Perfect AI (Locked)</option>
+                </select>
+            </div>
+            <div class="ai-stats">
+                <div class="stat-row">
+                    <span>Current Level Best:</span>
+                    <span id="ai-level-best">--</span>
+                </div>
+                <div class="stat-row">
+                    <span>Races Won:</span>
+                    <span id="ai-wins">0</span>
+                </div>
             </div>
         </div>
     </div>

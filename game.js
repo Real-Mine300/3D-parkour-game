@@ -72,6 +72,23 @@ class ParkourGame {
         // Finish block
         this.finishBlock = null;
         
+        // AI timing properties
+        this.aiTimer = 0;
+        this.aiFinishTime = null;
+        this.displayComparison = false;
+        
+        // Add combo system
+        this.combo = 0;
+        this.maxCombo = 0;
+        this.lastPlatformTime = 0;
+        
+        // Add post-processing effects
+        this.composer = new THREE.EffectComposer(this.renderer);
+        this.addPostProcessing();
+        
+        // Add dynamic lighting
+        this.addDynamicLighting();
+        
         this.init();
     }
 
@@ -283,6 +300,24 @@ class ParkourGame {
             this.camera.updateProjectionMatrix();
             this.renderer.setSize(window.innerWidth, window.innerHeight);
         });
+
+        document.getElementById('ai-difficulty').addEventListener('change', (e) => {
+            if (this.aiPlayer) {
+                this.changeAIDifficulty(e.target.value);
+                document.getElementById('ai-difficulty-display').textContent = 
+                    `AI Difficulty: ${e.target.value.charAt(0).toUpperCase() + e.target.value.slice(1)}`;
+            }
+        });
+
+        // Add sensitivity slider listener
+        const sensitivitySlider = document.getElementById('mouse-sensitivity');
+        const sensitivityValue = document.getElementById('sensitivity-value');
+        
+        sensitivitySlider.addEventListener('input', (e) => {
+            const value = e.target.value;
+            sensitivityValue.textContent = value;
+            this.updateMouseSensitivity(value);
+        });
     }
 
     startGame() {
@@ -312,14 +347,21 @@ class ParkourGame {
 
     toggleAI() {
         this.useAI = !this.useAI;
+        const difficultySelect = document.getElementById('ai-difficulty');
+        const difficulty = difficultySelect ? difficultySelect.value : 'medium';
+
         if (this.useAI) {
             if (!this.aiPlayer) {
-                this.aiPlayer = new AIPlayer(this);
+                this.aiPlayer = new AIPlayer(this, difficulty);
             }
             this.aiPlayer.reset();
-        } else if (this.aiPlayer) {
-            this.scene.remove(this.aiPlayer.model);
-            this.aiPlayer = null;
+            document.querySelector('.ai-section').style.display = 'block';
+        } else {
+            if (this.aiPlayer) {
+                this.scene.remove(this.aiPlayer.model);
+                this.aiPlayer = null;
+            }
+            document.querySelector('.ai-section').style.display = 'none';
         }
     }
 
@@ -373,62 +415,49 @@ class ParkourGame {
 
     checkCollisions() {
         this.isGrounded = false;
-
-        // Create player hitbox
         const playerBox = new THREE.Box3().setFromObject(this.player);
-        const playerBottom = this.player.position.y - 0.5; // Bottom of player
 
-        // Check each obstacle
         for (const obstacle of this.obstacles) {
             const obstacleBox = new THREE.Box3().setFromObject(obstacle);
             
-            // Check if player is colliding with obstacle
             if (playerBox.intersectsBox(obstacleBox)) {
                 switch(obstacle.userData.type) {
-                    case 'platform':
-                        // Check if player is above platform
-                        if (this.velocity.y <= 0 && playerBottom >= obstacle.position.y) {
-                            this.player.position.y = obstacle.position.y + 1;
-                            this.velocity.y = 0;
-                            this.isGrounded = true;
-                        }
-                        // Side collisions
-                        else {
-                            const overlap = playerBox.intersect(obstacleBox);
-                            const overlapSize = new THREE.Vector3(
-                                overlap.max.x - overlap.min.x,
-                                overlap.max.y - overlap.min.y,
-                                overlap.max.z - overlap.min.z
-                            );
-
-                            // Push player out of the smallest overlap direction
-                            if (overlapSize.x < overlapSize.y && overlapSize.x < overlapSize.z) {
-                                const pushDirection = this.player.position.x > obstacle.position.x ? 1 : -1;
-                                this.player.position.x += overlapSize.x * pushDirection;
-                            } else if (overlapSize.z < overlapSize.y) {
-                                const pushDirection = this.player.position.z > obstacle.position.z ? 1 : -1;
-                                this.player.position.z += overlapSize.z * pushDirection;
-                            }
-                        }
-                        break;
-
                     case 'glass':
-                        if (this.velocity.y < -0.2) {
-                            // Break glass if falling fast enough
-                            this.scene.remove(obstacle);
-                            this.obstacles = this.obstacles.filter(o => o !== obstacle);
-                        } else if (!this.isShifting) {
-                            // Same collision as platform if not breaking
-                            if (this.velocity.y <= 0 && playerBottom >= obstacle.position.y) {
-                                this.player.position.y = obstacle.position.y + 1;
-                                this.velocity.y = 0;
-                                this.isGrounded = true;
-                            }
+                        this.handleGlassPlatformCollision(obstacle);
+                        break;
+                        
+                    case 'ice':
+                        this.handleIcePlatformCollision(obstacle);
+                        break;
+                        
+                    case 'leaves':
+                        this.handleLeavesPlatformCollision(obstacle);
+                        break;
+                        
+                    case 'bounce':
+                        this.handleBouncePlatformCollision(obstacle);
+                        break;
+                        
+                    case 'speed':
+                        this.handleSpeedPlatformCollision(obstacle);
+                        break;
+                        
+                    case 'sticky':
+                        this.handleStickyPlatformCollision(obstacle);
+                        break;
+                        
+                    case 'phase':
+                        if (obstacle.userData.properties.isVisible) {
+                            this.handlePhasePlatformCollision(obstacle);
                         }
                         break;
-
+                        
                     case 'finish':
                         this.handleLevelComplete();
+                        break;
+                        
+                    default:
+                        this.handleNormalPlatformCollision(obstacle);
                         break;
                 }
             }
@@ -495,24 +524,27 @@ class ParkourGame {
         this.scene.add(floor);
 
         // Calculate difficulty factors
-        const difficulty = Math.min(levelNumber / 20, 1); // Scaled to reach max at level 20
+        const difficulty = Math.min(levelNumber / 20, 1);
         const platformCount = Math.floor(5 + (levelNumber * 0.5));
 
-        // Add platforms with increasing complexity
+        // Initialize bullet system for levels 30+
+        if (levelNumber >= 30) {
+            this.initializeBulletSystem();
+        }
+
+        // Add platforms with faster progressive introduction
         for (let i = 0; i < platformCount; i++) {
             let platformType = 'normal';
+            const rand = Math.random();
             
-            // Determine platform type based on level
-            if (levelNumber >= 5) {
-                const rand = Math.random();
-                if (levelNumber >= 15 && rand < 0.2) {
-                    platformType = 'leaves';
-                } else if (levelNumber >= 10 && rand < 0.3) {
-                    platformType = 'ice';
-                } else if (levelNumber >= 5 && rand < 0.4) {
-                    platformType = 'glass';
-                }
-            }
+            // Progressive platform type introduction (all by level 20)
+            if (levelNumber >= 3 && rand < 0.3) platformType = 'glass';
+            if (levelNumber >= 6 && rand < 0.25) platformType = 'ice';
+            if (levelNumber >= 9 && rand < 0.2) platformType = 'leaves';
+            if (levelNumber >= 12 && rand < 0.2) platformType = 'bounce';
+            if (levelNumber >= 15 && rand < 0.15) platformType = 'speed';
+            if (levelNumber >= 17 && rand < 0.15) platformType = 'sticky';
+            if (levelNumber >= 20 && rand < 0.15) platformType = 'phase';
 
             const platform = this.createPlatform(
                 new THREE.Vector3(
@@ -524,6 +556,11 @@ class ParkourGame {
             );
             
             this.obstacles.push(platform);
+
+            // Initialize phasing for phase platforms
+            if (platformType === 'phase') {
+                this.initializePhasePlatform(platform);
+            }
         }
 
         // Add finish block
@@ -537,29 +574,88 @@ class ParkourGame {
 
     createPlatform(position, type = 'normal') {
         let material;
+        let properties = {};
+        
         switch(type) {
             case 'glass':
                 material = new THREE.MeshPhongMaterial({
                     color: 0x88ccff,
                     transparent: true,
-                    opacity: 0.3
+                    opacity: 0.3,
+                    shininess: 90
                 });
+                properties.breakable = true;
+                properties.breakForce = 0.2;
                 break;
+                
             case 'ice':
                 material = new THREE.MeshPhongMaterial({
                     color: 0xaaddff,
-                    shininess: 100
+                    shininess: 100,
+                    specular: 0xffffff
                 });
+                properties.friction = 0.05;
+                properties.acceleration = 1.5;
                 break;
+                
             case 'leaves':
                 material = new THREE.MeshPhongMaterial({
-                    color: 0x33aa33
+                    color: 0x33aa33,
+                    emissive: 0x003300,
+                    roughness: 0.8
                 });
+                properties.crumbling = true;
+                properties.supportTime = 1000;
+                properties.regenerateTime = 3000;
                 break;
-            default:
+                
+            case 'bounce':
                 material = new THREE.MeshPhongMaterial({
-                    color: 0x8b4513
+                    color: 0xff3333,
+                    emissive: 0x330000,
+                    emissiveIntensity: 0.5
                 });
+                properties.bounceForce = 0.5;
+                break;
+
+            case 'speed':
+                material = new THREE.MeshPhongMaterial({
+                    color: 0xffcc00,
+                    emissive: 0x666600,
+                    emissiveIntensity: 0.3
+                });
+                properties.speedBoost = 2.0;
+                break;
+
+            case 'sticky':
+                material = new THREE.MeshPhongMaterial({
+                    color: 0x8b4513,
+                    roughness: 1.0,
+                    metalness: 0.1
+                });
+                properties.friction = 2.0;
+                properties.climbable = true;
+                break;
+
+            case 'phase':
+                material = new THREE.MeshPhongMaterial({
+                    color: 0x9370DB,
+                    transparent: true,
+                    opacity: 0.5,
+                    emissive: 0x4B0082,
+                    emissiveIntensity: 0.2
+                });
+                properties.phaseTime = 2000;
+                properties.isVisible = true;
+                break;
+                
+            default: // Normal platform
+                material = new THREE.MeshPhongMaterial({
+                    color: 0x808080,
+                    roughness: 0.7
+                });
+                properties.friction = 0.8;
+                break;
         }
 
         const platform = new THREE.Mesh(
@@ -571,8 +667,30 @@ class ParkourGame {
         platform.castShadow = true;
         platform.receiveShadow = true;
         platform.userData.type = type;
+        platform.userData.properties = properties;
         
         this.scene.add(platform);
+
+        // Add platform animations
+        const animate = (platform) => {
+            switch(type) {
+                case 'bounce':
+                    platform.scale.y = 1 + Math.sin(Date.now() * 0.003) * 0.1;
+                    break;
+                case 'speed':
+                    platform.rotation.y += 0.01;
+                    break;
+                case 'phase':
+                    platform.material.opacity = 
+                        platform.userData.properties.isVisible ? 
+                        0.5 + Math.sin(Date.now() * 0.005) * 0.2 : 0.1;
+                    break;
+            }
+        };
+        
+        // Add to animation loop
+        this.platformAnimations.push(animate);
+
         return platform;
     }
 
@@ -689,6 +807,7 @@ class ParkourGame {
         if (this.isPlaying) {
             this.updatePhysics();
             this.updateTimer();
+            this.updateBullets();
             if (this.useAI) {
                 this.updateAI();
             }
@@ -776,42 +895,441 @@ class ParkourGame {
             }, 1500);
         }
     }
+
+    updateHUD() {
+        document.getElementById('timer').textContent = `Time: ${this.formatTime(this.timer)}`;
+        document.getElementById('deaths').textContent = `Deaths: ${this.deaths}`;
+        document.getElementById('level').textContent = `Level: ${this.currentLevel}`;
+        
+        if (this.useAI && this.aiPlayer) {
+            const aiTimeElement = document.getElementById('ai-timer');
+            if (this.aiFinishTime) {
+                aiTimeElement.textContent = `AI Time: ${this.formatTime(this.aiFinishTime)}`;
+            } else {
+                aiTimeElement.textContent = `AI Time: Running...`;
+            }
+        }
+    }
+
+    formatTime(time) {
+        const minutes = Math.floor(time / 60);
+        const seconds = Math.floor(time % 60);
+        const milliseconds = Math.floor((time % 1) * 100);
+        return `${minutes}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
+    }
+
+    handleAIFinish() {
+        if (this.aiPlayer && !this.aiFinishTime) {
+            this.aiFinishTime = this.timer;
+            
+            // Update best time for this AI difficulty if better
+            const difficultyBestTimes = this.bestTimes[this.aiPlayer.difficulty] || [];
+            if (!difficultyBestTimes[this.currentLevel - 1] || 
+                this.aiFinishTime < difficultyBestTimes[this.currentLevel - 1]) {
+                difficultyBestTimes[this.currentLevel - 1] = this.aiFinishTime;
+                this.bestTimes[this.aiPlayer.difficulty] = difficultyBestTimes;
+            }
+
+            // Show completion message with time
+            this.showAICompletionMessage();
+        }
+    }
+
+    showAICompletionMessage() {
+        const minutes = Math.floor(this.aiFinishTime / 60);
+        const seconds = (this.aiFinishTime % 60).toFixed(2);
+        const timeStr = `${minutes}:${seconds.padStart(5, '0')}`;
+        
+        const message = document.createElement('div');
+        message.className = 'ai-completion-message';
+        message.innerHTML = `
+            <h3>${this.aiPlayer.difficulty.toUpperCase()} AI Finished!</h3>
+            <p>Time: ${timeStr}</p>
+        `;
+        document.body.appendChild(message);
+        
+        setTimeout(() => {
+            document.body.removeChild(message);
+        }, 3000);
+    }
+
+    // Add method to change AI difficulty
+    changeAIDifficulty(difficulty) {
+        if (this.aiPlayer) {
+            const position = this.aiPlayer.position.clone();
+            const velocity = this.aiPlayer.velocity.clone();
+            this.scene.remove(this.aiPlayer.model);
+            this.aiPlayer = new AIPlayer(this, difficulty);
+            this.aiPlayer.position.copy(position);
+            this.aiPlayer.velocity.copy(velocity);
+        }
+    }
+
+    handleNormalPlatformCollision(platform) {
+        // Check if player is above platform
+        if (this.velocity.y <= 0 && this.player.position.y > platform.position.y) {
+            this.player.position.y = platform.position.y + 1;
+            this.velocity.y = 0;
+            this.isGrounded = true;
+        }
+        // Side collisions
+        else {
+            const overlap = new THREE.Box3().setFromObject(this.player).intersect(new THREE.Box3().setFromObject(platform));
+            const overlapSize = new THREE.Vector3(
+                overlap.max.x - overlap.min.x,
+                overlap.max.y - overlap.min.y,
+                overlap.max.z - overlap.min.z
+            );
+
+            // Push player out of the smallest overlap direction
+            if (overlapSize.x < overlapSize.y && overlapSize.x < overlapSize.z) {
+                const pushDirection = this.player.position.x > platform.position.x ? 1 : -1;
+                this.player.position.x += overlapSize.x * pushDirection;
+            } else if (overlapSize.z < overlapSize.y) {
+                const pushDirection = this.player.position.z > platform.position.z ? 1 : -1;
+                this.player.position.z += overlapSize.z * pushDirection;
+            }
+        }
+    }
+
+    handleGlassPlatformCollision(platform) {
+        if (this.velocity.y < -0.2) {
+            // Break glass if falling fast enough
+            this.scene.remove(platform);
+            this.obstacles = this.obstacles.filter(o => o !== platform);
+        } else if (!this.isShifting) {
+            // Same collision as platform if not breaking
+            if (this.velocity.y <= 0 && this.player.position.y > platform.position.y) {
+                this.player.position.y = platform.position.y + 1;
+                this.velocity.y = 0;
+                this.isGrounded = true;
+            }
+        }
+    }
+
+    handleIcePlatformCollision(platform) {
+        // Apply ice physics - more slippery movement
+        if (this.isGrounded) {
+            this.velocity.x *= platform.userData.properties.acceleration;
+            this.velocity.z *= platform.userData.properties.acceleration;
+            this.moveSpeed *= platform.userData.properties.acceleration;
+        }
+    }
+
+    handleLeavesPlatformCollision(platform) {
+        if (!platform.userData.crumbling) {
+            platform.userData.crumbling = true;
+            
+            // Start crumbling animation
+            setTimeout(() => {
+                platform.position.y -= 10; // Make platform fall
+                
+                // Regenerate platform after delay
+                setTimeout(() => {
+                    platform.position.y += 10;
+                    platform.userData.crumbling = false;
+                }, platform.userData.properties.regenerateTime);
+                
+            }, platform.userData.properties.supportTime);
+        }
+    }
+
+    handleBouncePlatformCollision(platform) {
+        if (this.velocity.y <= 0) {
+            this.velocity.y = this.jumpForce + platform.userData.properties.bounceForce;
+            this.isGrounded = false;
+            
+            // Add bounce effect
+            this.addCameraShake(0.3, 0.2);
+        }
+    }
+
+    // Add new methods for bullet system
+    initializeBulletSystem() {
+        this.bullets = [];
+        this.bulletSpawners = [];
+        
+        // Add bullet spawners based on level
+        const spawnerCount = Math.min(Math.floor((this.currentLevel - 30) / 5) + 1, 4);
+        
+        for (let i = 0; i < spawnerCount; i++) {
+            const spawner = {
+                position: new THREE.Vector3(
+                    Math.random() * 16 - 8,
+                    5 + Math.random() * 10,
+                    10 + Math.random() * 20
+                ),
+                direction: new THREE.Vector3(
+                    Math.random() - 0.5,
+                    0,
+                    Math.random() - 0.5
+                ).normalize(),
+                fireRate: 2000 - (this.currentLevel - 30) * 50, // Faster bullets in higher levels
+                lastFired: 0
+            };
+            this.bulletSpawners.push(spawner);
+        }
+    }
+
+    createBullet(position, direction) {
+        const geometry = new THREE.SphereGeometry(0.2, 8, 8);
+        const material = new THREE.MeshPhongMaterial({
+            color: 0xff0000,
+            emissive: 0x330000
+        });
+        const bullet = new THREE.Mesh(geometry, material);
+        bullet.position.copy(position);
+        bullet.velocity = direction.multiplyScalar(0.2);
+        this.scene.add(bullet);
+        this.bullets.push(bullet);
+    }
+
+    updateBullets() {
+        if (this.currentLevel < 30) return;
+
+        // Update existing bullets
+        for (let i = this.bullets.length - 1; i >= 0; i--) {
+            const bullet = this.bullets[i];
+            bullet.position.add(bullet.velocity);
+
+            // Check for bullet collision with player
+            if (bullet.position.distanceTo(this.player.position) < 0.6) {
+                this.handleDeath();
+                this.scene.remove(bullet);
+                this.bullets.splice(i, 1);
+                continue;
+            }
+
+            // Remove bullets that are too far
+            if (bullet.position.length() > 50) {
+                this.scene.remove(bullet);
+                this.bullets.splice(i, 1);
+            }
+        }
+
+        // Spawn new bullets
+        const now = Date.now();
+        this.bulletSpawners.forEach(spawner => {
+            if (now - spawner.lastFired >= spawner.fireRate) {
+                this.createBullet(spawner.position.clone(), spawner.direction.clone());
+                spawner.lastFired = now;
+            }
+        });
+    }
+
+    initializePhasePlatform(platform) {
+        const toggleVisibility = () => {
+            platform.userData.properties.isVisible = !platform.userData.properties.isVisible;
+            platform.material.opacity = platform.userData.properties.isVisible ? 0.5 : 0.1;
+            platform.userData.properties.solid = platform.userData.properties.isVisible;
+        };
+
+        setInterval(toggleVisibility, platform.userData.properties.phaseTime);
+    }
+
+    // Add new platform collision handlers
+    handleSpeedPlatformCollision(platform) {
+        if (this.isGrounded) {
+            this.moveSpeed = this.baseSpeed * platform.userData.properties.speedBoost;
+            setTimeout(() => {
+                this.moveSpeed = this.baseSpeed;
+            }, 500);
+        }
+    }
+
+    handleStickyPlatformCollision(platform) {
+        this.isGrounded = true;
+        this.velocity.y = 0;
+        if (platform.userData.properties.climbable) {
+            this.velocity.multiplyScalar(0.5);
+        }
+    }
+
+    handlePhasePlatformCollision(platform) {
+        if (platform.userData.properties.isVisible) {
+            this.handleNormalPlatformCollision(platform);
+        }
+    }
+
+    // Add particle effects for platform interactions
+    createParticleEffect(position, color, count = 10) {
+        const particles = [];
+        for (let i = 0; i < count; i++) {
+            const particle = new THREE.Mesh(
+                new THREE.SphereGeometry(0.1, 4, 4),
+                new THREE.MeshBasicMaterial({ color: color })
+            );
+            particle.position.copy(position);
+            particle.velocity = new THREE.Vector3(
+                (Math.random() - 0.5) * 0.2,
+                Math.random() * 0.2,
+                (Math.random() - 0.5) * 0.2
+            );
+            particles.push(particle);
+            this.scene.add(particle);
+        }
+        return particles;
+    }
+
+    addPostProcessing() {
+        const bloomPass = new THREE.UnrealBloomPass();
+        bloomPass.strength = 0.5;
+        this.composer.addPass(bloomPass);
+        
+        const glowPass = new THREE.ShaderPass(/* custom glow shader */);
+        this.composer.addPass(glowPass);
+    }
+
+    addDynamicLighting() {
+        // Add point lights that follow the player
+        const pointLight = new THREE.PointLight(0xffffff, 0.5);
+        this.player.add(pointLight);
+        
+        // Add ambient color shifts based on level
+        const ambientLight = new THREE.AmbientLight();
+        this.scene.add(ambientLight);
+        
+        // Update ambient light color based on level
+        const hue = (this.currentLevel % 10) / 10;
+        ambientLight.color.setHSL(hue, 0.5, 0.5);
+    }
+
+    // Add method to update mouse sensitivity
+    updateMouseSensitivity(value) {
+        this.mouseSensitivity = value / 5000; // Convert slider value to usable sensitivity
+    }
 }
 
 // AI Implementation
 class AIPlayer {
-    constructor(game) {
+    constructor(game, difficulty = 'medium') {
         this.game = game;
         this.position = new THREE.Vector3();
         this.velocity = new THREE.Vector3();
-        this.moveSpeed = 0.15;
-        this.jumpForce = 0.35;
+        this.difficulty = difficulty;
+        
+        // Adjust AI parameters based on difficulty
+        switch(difficulty) {
+            case 'easy':
+                this.moveSpeed = 0.12;
+                this.jumpForce = 0.3;
+                this.reactionTime = 300; // ms
+                this.errorRate = 0.3; // 30% chance of making mistakes
+                break;
+            case 'medium':
+                this.moveSpeed = 0.15;
+                this.jumpForce = 0.35;
+                this.reactionTime = 200;
+                this.errorRate = 0.15;
+                break;
+            case 'hard':
+                this.moveSpeed = 0.18;
+                this.jumpForce = 0.38;
+                this.reactionTime = 100;
+                this.errorRate = 0.05;
+                break;
+            case 'expert':
+                this.moveSpeed = 0.22;
+                this.jumpForce = 0.4;
+                this.reactionTime = 50;
+                this.errorRate = 0.02;
+                break;
+            case 'perfect':
+                this.moveSpeed = 0.25;
+                this.jumpForce = 0.42;
+                this.reactionTime = 0;
+                this.errorRate = 0;
+                break;
+        }
+
         this.isGrounded = false;
         this.target = null;
         this.pathPoints = [];
         this.currentPathIndex = 0;
+        this.lastDecisionTime = 0;
         
         this.createAIModel();
     }
 
     createAIModel() {
         const geometry = new THREE.BoxGeometry(1, 1, 1);
+        
+        // Define distinct AI colors
+        let color, emissive, emissiveIntensity;
+        switch(this.difficulty) {
+            case 'easy':
+                color = 0x00ff99;        // Bright cyan-green
+                emissive = 0x00ff99;
+                emissiveIntensity = 0.3;
+                break;
+            case 'medium':
+                color = 0xff6600;        // Bright orange
+                emissive = 0xff3300;
+                emissiveIntensity = 0.4;
+                break;
+            case 'hard':
+                color = 0xff0066;        // Hot pink
+                emissive = 0xff0066;
+                emissiveIntensity = 0.5;
+                break;
+            case 'expert':
+                color = 0x6600ff;        // Bright purple
+                emissive = 0x6600ff;
+                emissiveIntensity = 0.6;
+                break;
+            case 'perfect':
+                color = 0xffff33;        // Bright yellow
+                emissive = 0xffff33;
+                emissiveIntensity = 0.7;
+                break;
+        }
+        
         const material = new THREE.MeshPhongMaterial({ 
-            color: 0xff0000,
-            emissive: 0x330000
+            color: color,
+            emissive: emissive,
+            emissiveIntensity: emissiveIntensity,
+            shininess: 30
         });
+        
         this.model = new THREE.Mesh(geometry, material);
         this.model.castShadow = true;
+        
+        // Add glowing effect for higher difficulties
+        if (this.difficulty === 'expert' || this.difficulty === 'perfect') {
+            const glowGeometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+            const glowMaterial = new THREE.MeshPhongMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.3
+            });
+            const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
+            this.model.add(glowMesh);
+        }
+        
         this.game.scene.add(this.model);
     }
 
     update() {
+        // Add random mistakes based on difficulty
+        if (Math.random() < this.errorRate) {
+            // Simulate AI mistakes like:
+            // - Slight direction changes
+            // - Delayed jumps
+            // - Occasional misses
+            this.velocity.x += (Math.random() - 0.5) * 0.1;
+            this.velocity.z += (Math.random() - 0.5) * 0.1;
+            return;
+        }
+
+        // Only make new decisions after reaction time has passed
+        const now = Date.now();
+        if (now - this.lastDecisionTime >= this.reactionTime) {
+            this.makeDecision();
+            this.lastDecisionTime = now;
+        }
+
         // Apply gravity
         this.velocity.y += this.game.gravity;
-
-        if (!this.target || this.reachedTarget()) {
-            this.findNewTarget();
-        }
 
         if (this.target) {
             // Calculate direction to target
@@ -835,6 +1353,52 @@ class AIPlayer {
 
         // Check collisions
         this.checkCollisions();
+    }
+
+    makeDecision() {
+        // Add pathfinding to avoid obstacles
+        if (!this.target || this.reachedTarget()) {
+            // Look ahead for multiple platforms instead of just the next one
+            const platforms = this.findBestPath();
+            if (platforms.length > 0) {
+                this.pathPoints = platforms;
+                this.currentPathIndex = 0;
+                this.target = this.pathPoints[0].position.clone().add(new THREE.Vector3(0, 1, 0));
+            }
+        }
+
+        // Add bullet avoidance for levels 30+
+        if (this.game.currentLevel >= 30) {
+            this.avoidBullets();
+        }
+    }
+
+    findBestPath() {
+        const platforms = [];
+        let currentHeight = this.position.y;
+        let currentPos = this.position.clone();
+        
+        // Look for sequence of reachable platforms leading to finish
+        for (const obstacle of this.game.obstacles) {
+            if (obstacle.position.y > currentHeight && 
+                obstacle.position.distanceTo(currentPos) < this.getJumpRange()) {
+                platforms.push(obstacle);
+                currentHeight = obstacle.position.y;
+                currentPos = obstacle.position.clone();
+            }
+        }
+        return platforms;
+    }
+
+    avoidBullets() {
+        for (const bullet of this.game.bullets) {
+            const futurePos = bullet.position.clone().add(bullet.velocity.clone().multiplyScalar(5));
+            if (futurePos.distanceTo(this.position) < 1.5) {
+                // Calculate dodge direction perpendicular to bullet path
+                const dodgeDir = new THREE.Vector3(-bullet.velocity.z, 0, bullet.velocity.x).normalize();
+                this.velocity.add(dodgeDir.multiplyScalar(0.1));
+            }
+        }
     }
 
     checkCollisions() {
@@ -864,41 +1428,6 @@ class AIPlayer {
         if (this.position.y < -10) {
             this.reset();
         }
-    }
-
-    findNewTarget() {
-        let bestTarget = null;
-        let bestScore = -Infinity;
-
-        for (const obstacle of this.game.obstacles) {
-            if (obstacle.userData.type === 'finish') {
-                bestTarget = obstacle.position.clone();
-                break;
-            }
-
-            const score = this.evaluateTarget(obstacle.position);
-            if (score > bestScore) {
-                bestScore = score;
-                bestTarget = obstacle.position.clone();
-            }
-        }
-
-        if (bestTarget) {
-            this.target = bestTarget.add(new THREE.Vector3(0, 1, 0));
-        }
-    }
-
-    evaluateTarget(position) {
-        // Score based on progress towards finish
-        let score = position.z * 2;
-        
-        // Bonus for height gain (but not too much)
-        score += Math.min(position.y - this.position.y, 5) * 1.5;
-        
-        // Penalty for distance from current position
-        score -= this.position.distanceTo(position) * 0.5;
-        
-        return score;
     }
 
     reachedTarget() {
