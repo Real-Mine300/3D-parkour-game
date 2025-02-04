@@ -1495,7 +1495,4 @@ class AIPlayer {
         const t = Math.sqrt(2 * this.jumpForce / -this.game.gravity);
         return this.moveSpeed * t * 1.5; // Add 50% safety margin
     }
-}
-
-// Initialize game
-const game = new ParkourGame(); 
+} 
