@@ -106,15 +106,15 @@ class ParkourGame {
             directionalLight.castShadow = true;
             this.scene.add(directionalLight);
 
-            // Create player
+            // Create player first
             this.createPlayer();
-            
-            // Now add dynamic lighting that follows the player
-            this.addDynamicLighting();
             
             // Setup camera
             this.camera.position.set(0, 5, 10);
             this.camera.lookAt(this.player.position);
+
+            // Now add dynamic lighting that follows the player
+            this.addDynamicLighting();
 
             // Initialize controls and events
             this.setupControls();
@@ -129,17 +129,25 @@ class ParkourGame {
             console.log('Game initialized successfully');
         } catch (error) {
             console.error('Error initializing game:', error);
-            alert('Error initializing game. Please refresh the page.');
+            throw error;
         }
     }
 
     createPlayer() {
-        const geometry = new THREE.BoxGeometry(1, 1, 1);
-        const material = new THREE.MeshPhongMaterial({ color: 0x00ff00 });
-        this.player = new THREE.Mesh(geometry, material);
-        this.player.castShadow = true;
-        this.player.receiveShadow = true;
-        this.scene.add(this.player);
+        try {
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            const material = new THREE.MeshPhongMaterial({ color: 0x00ff00 });
+            this.player = new THREE.Mesh(geometry, material);
+            this.player.castShadow = true;
+            this.player.receiveShadow = true;
+            this.scene.add(this.player);
+            
+            // Set initial position
+            this.player.position.set(0, 0, 0);
+        } catch (error) {
+            console.error('Error creating player:', error);
+            throw error;
+        }
     }
 
     setupControls() {
@@ -295,37 +303,32 @@ class ParkourGame {
     }
 
     setupEventListeners() {
-        document.getElementById('start-game').addEventListener('click', () => {
-            this.startGame();
-        });
-
-        document.getElementById('toggle-ai').addEventListener('click', () => {
-            this.toggleAI();
-        });
-
+        // Only keep the window resize and sensitivity events
         window.addEventListener('resize', () => {
             this.camera.aspect = window.innerWidth / window.innerHeight;
             this.camera.updateProjectionMatrix();
             this.renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        document.getElementById('ai-difficulty').addEventListener('change', (e) => {
-            if (this.aiPlayer) {
-                this.changeAIDifficulty(e.target.value);
-                document.getElementById('ai-difficulty-display').textContent = 
-                    `AI Difficulty: ${e.target.value.charAt(0).toUpperCase() + e.target.value.slice(1)}`;
-            }
-        });
-
         // Add sensitivity slider listener
         const sensitivitySlider = document.getElementById('mouse-sensitivity');
         const sensitivityValue = document.getElementById('sensitivity-value');
         
-        sensitivitySlider.addEventListener('input', (e) => {
-            const value = e.target.value;
-            sensitivityValue.textContent = value;
-            this.updateMouseSensitivity(value);
-        });
+        if (sensitivitySlider && sensitivityValue) {
+            sensitivitySlider.addEventListener('input', (e) => {
+                const value = e.target.value;
+                sensitivityValue.textContent = value;
+                this.updateMouseSensitivity(value);
+            });
+        }
+
+        // Add keyboard controls
+        document.addEventListener('keydown', (e) => this.handleKeyDown(e));
+        document.addEventListener('keyup', (e) => this.handleKeyUp(e));
+        
+        // Add mouse controls
+        document.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+        document.addEventListener('wheel', (e) => this.handleMouseWheel(e));
     }
 
     startGame() {

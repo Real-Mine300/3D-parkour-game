@@ -104,18 +104,21 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="game.js"></script>
     <script>
-        // Initialize the game when the window loads
+        let game;
         window.addEventListener('load', () => {
-            const game = new ParkourGame();
-            
-            // Add event listeners for the menu buttons
-            document.getElementById('start-game').addEventListener('click', () => {
-                game.startGame();
-            });
-            
-            document.getElementById('toggle-ai').addEventListener('click', () => {
-                game.toggleAI();
-            });
+            try {
+                game = new ParkourGame();
+                // Add event listeners
+                document.getElementById('start-game').addEventListener('click', () => {
+                    game.startGame();
+                });
+                
+                document.getElementById('toggle-ai').addEventListener('click', () => {
+                    game.toggleAI();
+                });
+            } catch (error) {
+                console.error('Error initializing game:', error);
+            }
         });
     </script>
 </body>
