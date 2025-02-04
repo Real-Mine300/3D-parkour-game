@@ -89,40 +89,48 @@ class ParkourGame {
         // Add dynamic lighting
         this.addDynamicLighting();
         
+        this.platformAnimations = [];
+        
         this.init();
     }
 
     init() {
-        // Setup renderer
-        this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.shadowMap.enabled = true;
-        document.getElementById('game-container').appendChild(this.renderer.domElement);
+        try {
+            // Setup renderer
+            this.renderer.setSize(window.innerWidth, window.innerHeight);
+            this.renderer.shadowMap.enabled = true;
+            const container = document.getElementById('game-container');
+            if (!container) throw new Error('Game container not found');
+            container.appendChild(this.renderer.domElement);
 
-        // Setup lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-        this.scene.add(ambientLight);
+            // Setup lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            this.scene.add(ambientLight);
 
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        directionalLight.position.set(10, 20, 10);
-        directionalLight.castShadow = true;
-        this.scene.add(directionalLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 20, 10);
+            directionalLight.castShadow = true;
+            this.scene.add(directionalLight);
 
-        // Create player
-        this.createPlayer();
-        
-        // Setup camera
-        this.camera.position.set(0, 5, 10);
-        this.camera.lookAt(this.player.position);
+            // Create player
+            this.createPlayer();
+            
+            // Setup camera
+            this.camera.position.set(0, 5, 10);
+            this.camera.lookAt(this.player.position);
 
-        // Initialize controls and events
-        this.setupControls();
-        this.setupEventListeners();
-        
-        // Load first level
-        this.loadLevel(1);
-        
-        // Start animation loop
-        this.animate();
+            // Initialize controls and events
+            this.setupControls();
+            this.setupEventListeners();
+            
+            // Load first level
+            this.loadLevel(1);
+            
+            console.log('Game initialized successfully');
+        } catch (error) {
+            console.error('Error initializing game:', error);
+            alert('Error initializing game. Please refresh the page.');
+        }
     }
 
     createPlayer() {
@@ -327,41 +335,36 @@ class ParkourGame {
         this.currentLevel = 1;
         this.loadLevel(1);
         
-        // Hide menu
-        document.getElementById('menu').style.display = 'none';
-        
-        // Reset player position
+        // Reset player position and velocity
         this.player.position.set(0, 0, 0);
         this.velocity.set(0, 0, 0);
         
-        // Create AI if enabled
-        if (this.useAI && !this.aiPlayer) {
-            this.aiPlayer = new AIPlayer(this);
-        }
+        // Hide menu and show game UI
+        document.getElementById('menu').style.display = 'none';
+        document.getElementById('hud').style.display = 'block';
         
-        // Update HUD
-        document.getElementById('deaths').textContent = `Deaths: ${this.deaths}`;
-        document.getElementById('level').textContent = `Level: ${this.currentLevel}`;
-        document.getElementById('timer').textContent = 'Time: 0:00';
+        // Lock pointer for camera control
+        this.renderer.domElement.requestPointerLock();
     }
 
     toggleAI() {
         this.useAI = !this.useAI;
         const difficultySelect = document.getElementById('ai-difficulty');
         const difficulty = difficultySelect ? difficultySelect.value : 'medium';
+        const aiSection = document.querySelector('.ai-section');
 
         if (this.useAI) {
             if (!this.aiPlayer) {
                 this.aiPlayer = new AIPlayer(this, difficulty);
             }
             this.aiPlayer.reset();
-            document.querySelector('.ai-section').style.display = 'block';
+            aiSection.classList.add('active');
         } else {
             if (this.aiPlayer) {
                 this.scene.remove(this.aiPlayer.model);
                 this.aiPlayer = null;
             }
-            document.querySelector('.ai-section').style.display = 'none';
+            aiSection.classList.remove('active');
         }
     }
 
@@ -422,27 +425,34 @@ class ParkourGame {
             const obstacleBox = new THREE.Box3().setFromObject(obstacle);
             
             if (playerBox.intersectsBox(obstacleBox)) {
+                // Get collision overlap
                 const overlap = new THREE.Vector3(
                     Math.min(playerBox.max.x - obstacleBox.min.x, obstacleBox.max.x - playerBox.min.x),
                     Math.min(playerBox.max.y - obstacleBox.min.y, obstacleBox.max.y - playerBox.min.y),
                     Math.min(playerBox.max.z - obstacleBox.min.z, obstacleBox.max.z - playerBox.min.z)
                 );
 
-                // Determine collision direction
+                // Determine if it's a top collision
                 const isTopCollision = this.velocity.y <= 0 && 
                     playerBottom >= obstacle.position.y + 0.25 &&
                     overlap.y < overlap.x && overlap.y < overlap.z;
 
                 if (isTopCollision) {
-                    // Landing on top of platform
+                    // Landing on platform
                     this.player.position.y = obstacle.position.y + 0.75;
                     this.velocity.y = 0;
                     this.isGrounded = true;
 
+                    // Handle finish block first
+                    if (obstacle.userData.type === 'finish') {
+                        this.handleLevelComplete();
+                        return;
+                    }
+
                     // Handle special platform effects
                     switch(obstacle.userData.type) {
                         case 'glass':
-                            if (this.velocity.y < -0.2) {
+                            if (Math.abs(this.velocity.y) > 0.2) {
                                 this.scene.remove(obstacle);
                                 this.obstacles = this.obstacles.filter(o => o !== obstacle);
                                 return;
@@ -463,12 +473,10 @@ class ParkourGame {
                 } else {
                     // Side collision - push player out
                     if (overlap.x < overlap.z) {
-                        // X-axis collision
                         const pushDirection = this.player.position.x > obstacle.position.x ? 1 : -1;
                         this.player.position.x += overlap.x * pushDirection;
                         this.velocity.x = 0;
                     } else {
-                        // Z-axis collision
                         const pushDirection = this.player.position.z > obstacle.position.z ? 1 : -1;
                         this.player.position.z += overlap.z * pushDirection;
                         this.velocity.z = 0;
@@ -505,11 +513,24 @@ class ParkourGame {
     updateTimer() {
         if (this.isPlaying) {
             this.timer += 1/60; // Assuming 60 FPS
-            const minutes = Math.floor(this.timer / 60);
-            const seconds = Math.floor(this.timer % 60);
-            document.getElementById('timer').textContent = 
-                `Time: ${minutes}:${seconds.toString().padStart(2, '0')}`;
+            document.getElementById('timer').textContent = this.formatTime(this.timer);
+            
+            if (this.useAI && this.aiPlayer) {
+                const aiTimeElement = document.getElementById('ai-timer');
+                if (this.aiFinishTime) {
+                    aiTimeElement.textContent = `AI: ${this.formatTime(this.aiFinishTime)}`;
+                } else {
+                    aiTimeElement.textContent = 'AI: Running...';
+                }
+            }
         }
+    }
+
+    formatTime(time) {
+        const minutes = Math.floor(time / 60);
+        const seconds = Math.floor(time % 60);
+        const milliseconds = Math.floor((time % 1) * 100);
+        return `${minutes}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
     }
 
     loadLevel(levelNumber) {
@@ -827,6 +848,12 @@ class ParkourGame {
             this.updatePhysics();
             this.updateTimer();
             this.updateBullets();
+            
+            // Update platform animations
+            for (const animate of this.platformAnimations) {
+                animate();
+            }
+            
             if (this.useAI) {
                 this.updateAI();
             }
@@ -928,13 +955,6 @@ class ParkourGame {
                 aiTimeElement.textContent = `AI Time: Running...`;
             }
         }
-    }
-
-    formatTime(time) {
-        const minutes = Math.floor(time / 60);
-        const seconds = Math.floor(time % 60);
-        const milliseconds = Math.floor((time % 1) * 100);
-        return `${minutes}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(2, '0')}`;
     }
 
     handleAIFinish() {
@@ -1397,15 +1417,35 @@ class AIPlayer {
         let currentHeight = this.position.y;
         let currentPos = this.position.clone();
         
-        // Look for sequence of reachable platforms leading to finish
-        for (const obstacle of this.game.obstacles) {
-            if (obstacle.position.y > currentHeight && 
-                obstacle.position.distanceTo(currentPos) < this.getJumpRange()) {
-                platforms.push(obstacle);
-                currentHeight = obstacle.position.y;
-                currentPos = obstacle.position.clone();
+        // First look for finish block
+        const finish = this.game.obstacles.find(o => o.userData.type === 'finish');
+        if (finish) {
+            // If finish is reachable, target it directly
+            if (finish.position.distanceTo(currentPos) < this.getJumpRange() * 2) {
+                platforms.push(finish);
+                return platforms;
             }
         }
+        
+        // Sort platforms by distance and height
+        const sortedPlatforms = this.game.obstacles
+            .filter(o => o.userData.type !== 'finish')
+            .sort((a, b) => {
+                const scoreA = a.position.z * 2 + a.position.y;
+                const scoreB = b.position.z * 2 + b.position.y;
+                return scoreB - scoreA;
+            });
+
+        // Find reachable platforms leading to finish
+        for (const platform of sortedPlatforms) {
+            if (platform.position.y >= currentHeight && 
+                platform.position.distanceTo(currentPos) < this.getJumpRange()) {
+                platforms.push(platform);
+                currentHeight = platform.position.y;
+                currentPos = platform.position.clone();
+            }
+        }
+        
         return platforms;
     }
 
@@ -1458,6 +1498,12 @@ class AIPlayer {
         this.velocity.set(0, 0, 0);
         this.target = null;
         this.model.position.copy(this.position);
+    }
+
+    getJumpRange() {
+        // Calculate max jump distance based on physics
+        const t = Math.sqrt(2 * this.jumpForce / -this.game.gravity);
+        return this.moveSpeed * t * 1.5; // Add 50% safety margin
     }
 }
 

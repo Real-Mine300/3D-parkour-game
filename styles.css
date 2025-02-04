@@ -1,11 +1,13 @@
 body {
     margin: 0;
     overflow: hidden;
+    background: #000;
 }
 
 #game-container {
     width: 100vw;
     height: 100vh;
+    position: relative;
 }
 
 #hud {
@@ -19,7 +21,7 @@ body {
     background: rgba(0, 0, 0, 0.5);
     padding: 10px 20px;
     border-radius: 10px;
-    z-index: 1000;
+    pointer-events: none; /* Allow clicking through HUD */
 }
 
 .timer-section {
@@ -50,11 +52,15 @@ body {
 }
 
 #menu {
-    position: absolute;
+    position: fixed;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.8);
+    padding: 20px;
+    border-radius: 10px;
     text-align: center;
+    color: white;
 }
 
 button {
