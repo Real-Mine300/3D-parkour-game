@@ -9,12 +9,44 @@ body {
 }
 
 #hud {
-    position: absolute;
-    top: 20px;
+    position: fixed;
+    bottom: 20px;
     left: 20px;
+    font-family: 'Arial', sans-serif;
+    font-size: 24px;
     color: white;
-    font-family: Arial, sans-serif;
-    font-size: 18px;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.5);
+    padding: 10px 20px;
+    border-radius: 10px;
+    z-index: 1000;
+}
+
+.timer-section {
+    display: inline-block;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+#timer {
+    color: #fff;
+    font-size: 28px;
+    text-shadow: 
+        0 0 10px rgba(255, 255, 255, 0.5),
+        2px 2px 4px rgba(0, 0, 0, 0.7);
+}
+
+/* Remove unused sections */
+.ai-section, #best-time, #level, #deaths {
+    display: none;
+}
+
+/* Only show AI time when AI is active */
+.ai-section.active {
+    display: inline-block;
+    margin-left: 20px;
+    padding-left: 20px;
+    border-left: 2px solid rgba(255, 255, 255, 0.3);
 }
 
 #menu {

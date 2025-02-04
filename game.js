@@ -416,51 +416,70 @@ class ParkourGame {
     checkCollisions() {
         this.isGrounded = false;
         const playerBox = new THREE.Box3().setFromObject(this.player);
+        const playerBottom = this.player.position.y - 0.5;
 
         for (const obstacle of this.obstacles) {
             const obstacleBox = new THREE.Box3().setFromObject(obstacle);
             
             if (playerBox.intersectsBox(obstacleBox)) {
-                switch(obstacle.userData.type) {
-                    case 'glass':
-                        this.handleGlassPlatformCollision(obstacle);
-                        break;
-                        
-                    case 'ice':
-                        this.handleIcePlatformCollision(obstacle);
-                        break;
-                        
-                    case 'leaves':
-                        this.handleLeavesPlatformCollision(obstacle);
-                        break;
-                        
-                    case 'bounce':
-                        this.handleBouncePlatformCollision(obstacle);
-                        break;
-                        
-                    case 'speed':
-                        this.handleSpeedPlatformCollision(obstacle);
-                        break;
-                        
-                    case 'sticky':
-                        this.handleStickyPlatformCollision(obstacle);
-                        break;
-                        
-                    case 'phase':
-                        if (obstacle.userData.properties.isVisible) {
-                            this.handlePhasePlatformCollision(obstacle);
-                        }
-                        break;
-                        
-                    case 'finish':
-                        this.handleLevelComplete();
-                        break;
-                        
-                    default:
-                        this.handleNormalPlatformCollision(obstacle);
-                        break;
+                const overlap = new THREE.Vector3(
+                    Math.min(playerBox.max.x - obstacleBox.min.x, obstacleBox.max.x - playerBox.min.x),
+                    Math.min(playerBox.max.y - obstacleBox.min.y, obstacleBox.max.y - playerBox.min.y),
+                    Math.min(playerBox.max.z - obstacleBox.min.z, obstacleBox.max.z - playerBox.min.z)
+                );
+
+                // Determine collision direction
+                const isTopCollision = this.velocity.y <= 0 && 
+                    playerBottom >= obstacle.position.y + 0.25 &&
+                    overlap.y < overlap.x && overlap.y < overlap.z;
+
+                if (isTopCollision) {
+                    // Landing on top of platform
+                    this.player.position.y = obstacle.position.y + 0.75;
+                    this.velocity.y = 0;
+                    this.isGrounded = true;
+
+                    // Handle special platform effects
+                    switch(obstacle.userData.type) {
+                        case 'glass':
+                            if (this.velocity.y < -0.2) {
+                                this.scene.remove(obstacle);
+                                this.obstacles = this.obstacles.filter(o => o !== obstacle);
+                                return;
+                            }
+                            break;
+                        case 'ice':
+                            this.velocity.multiplyScalar(1.1);
+                            this.moveSpeed *= 1.2;
+                            break;
+                        case 'bounce':
+                            this.velocity.y = this.jumpForce * 1.5;
+                            this.isGrounded = false;
+                            break;
+                        case 'speed':
+                            this.moveSpeed = this.baseSpeed * 2;
+                            break;
+                    }
+                } else {
+                    // Side collision - push player out
+                    if (overlap.x < overlap.z) {
+                        // X-axis collision
+                        const pushDirection = this.player.position.x > obstacle.position.x ? 1 : -1;
+                        this.player.position.x += overlap.x * pushDirection;
+                        this.velocity.x = 0;
+                    } else {
+                        // Z-axis collision
+                        const pushDirection = this.player.position.z > obstacle.position.z ? 1 : -1;
+                        this.player.position.z += overlap.z * pushDirection;
+                        this.velocity.z = 0;
+                    }
                 }
             }
+        }
+
+        // Reset movement speed if not on special platforms
+        if (this.isGrounded && this.moveSpeed !== this.baseSpeed) {
+            this.moveSpeed = this.baseSpeed;
         }
 
         // Floor collision
