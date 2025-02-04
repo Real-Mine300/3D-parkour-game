@@ -424,40 +424,42 @@ class ParkourGame {
             this.aiPlayer.update();
         }
     }
-    
+
     checkCollisions() {
         this.isGrounded = false;
         const playerBox = new THREE.Box3().setFromObject(this.player);
         const playerBottom = this.player.position.y - 0.5;
-    
+
         for (const obstacle of this.obstacles) {
             const obstacleBox = new THREE.Box3().setFromObject(obstacle);
             
             if (playerBox.intersectsBox(obstacleBox)) {
-                // Calculate overlap correctly
+                // Get collision overlap
                 const overlap = new THREE.Vector3(
-                    Math.abs(playerBox.max.x - obstacleBox.min.x - (obstacleBox.max.x - playerBox.min.x)),
-                    Math.abs(playerBox.max.y - obstacleBox.min.y - (obstacleBox.max.y - playerBox.min.y)),
-                    Math.abs(playerBox.max.z - obstacleBox.min.z - (obstacleBox.max.z - playerBox.min.z))
+                    Math.min(playerBox.max.x - obstacleBox.min.x, obstacleBox.max.x - playerBox.min.x),
+                    Math.min(playerBox.max.y - obstacleBox.min.y, obstacleBox.max.y - playerBox.min.y),
+                    Math.min(playerBox.max.z - obstacleBox.min.z, obstacleBox.max.z - playerBox.min.z)
                 );
-    
-                // Determine the axis with the smallest overlap (main collision axis)
-                const minOverlap = Math.min(overlap.x, overlap.y, overlap.z);
-    
-                if (this.velocity.y <= 0 && playerBottom >= obstacle.position.y + 0.25 && minOverlap === overlap.y) {
-                    // Top collision (landing on a platform)
+
+                // Determine if it's a top collision
+                const isTopCollision = this.velocity.y <= 0 && 
+                    playerBottom >= obstacle.position.y + 0.25 &&
+                    overlap.y < overlap.x && overlap.y < overlap.z;
+
+                if (isTopCollision) {
+                    // Landing on platform
                     this.player.position.y = obstacle.position.y + 0.75;
                     this.velocity.y = 0;
                     this.isGrounded = true;
-    
+
                     // Handle finish block first
                     if (obstacle.userData.type === 'finish') {
                         this.handleLevelComplete();
                         return;
                     }
-    
+
                     // Handle special platform effects
-                    switch (obstacle.userData.type) {
+                    switch(obstacle.userData.type) {
                         case 'glass':
                             if (Math.abs(this.velocity.y) > 0.2) {
                                 this.scene.remove(obstacle);
@@ -478,32 +480,32 @@ class ParkourGame {
                             break;
                     }
                 } else {
-                    // Side collision - resolve using the smallest overlap
-                    if (minOverlap === overlap.x) {
+                    // Side collision - push player out
+                    if (overlap.x < overlap.z) {
                         const pushDirection = this.player.position.x > obstacle.position.x ? 1 : -1;
-                        this.player.position.x += minOverlap * pushDirection;
+                        this.player.position.x += overlap.x * pushDirection;
                         this.velocity.x = 0;
-                    } else if (minOverlap === overlap.z) {
+                    } else {
                         const pushDirection = this.player.position.z > obstacle.position.z ? 1 : -1;
-                        this.player.position.z += minOverlap * pushDirection;
+                        this.player.position.z += overlap.z * pushDirection;
                         this.velocity.z = 0;
                     }
                 }
             }
         }
-    
+
         // Reset movement speed if not on special platforms
         if (this.isGrounded && this.moveSpeed !== this.baseSpeed) {
             this.moveSpeed = this.baseSpeed;
         }
-    
+
         // Floor collision
         if (this.player.position.y <= 0) {
             this.player.position.y = 0;
             this.velocity.y = 0;
             this.isGrounded = true;
         }
-    
+
         // Void death
         if (this.player.position.y < -10) {
             this.handleDeath();
@@ -870,7 +872,6 @@ class ParkourGame {
     }
 
     updateCamera() {
-        console.log(`${this.player.postion.y},  ${this.player.postion.x}, ${this.player.postion.z}`)
         // Calculate camera position based on player position and camera angle
         const cameraOffset = new THREE.Vector3(
             Math.sin(this.cameraAngle) * this.cameraDistance,
