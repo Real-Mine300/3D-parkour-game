@@ -83,8 +83,6 @@ class ParkourGame {
         this.lastPlatformTime = 0;
         
         // Keep dynamic lighting
-        this.addDynamicLighting();
-        
         this.platformAnimations = [];
         
         this.init();
@@ -99,7 +97,7 @@ class ParkourGame {
             if (!container) throw new Error('Game container not found');
             container.appendChild(this.renderer.domElement);
 
-            // Setup lighting
+            // Setup basic lighting first
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
             this.scene.add(ambientLight);
 
@@ -110,6 +108,9 @@ class ParkourGame {
 
             // Create player
             this.createPlayer();
+            
+            // Now add dynamic lighting that follows the player
+            this.addDynamicLighting();
             
             // Setup camera
             this.camera.position.set(0, 5, 10);
@@ -1210,17 +1211,19 @@ class ParkourGame {
     }
 
     addDynamicLighting() {
+        if (!this.player) {
+            console.error('Player not initialized for dynamic lighting');
+            return;
+        }
         // Add point lights that follow the player
         const pointLight = new THREE.PointLight(0xffffff, 0.5);
         this.player.add(pointLight);
         
         // Add ambient color shifts based on level
-        const ambientLight = new THREE.AmbientLight();
-        this.scene.add(ambientLight);
-        
-        // Update ambient light color based on level
         const hue = (this.currentLevel % 10) / 10;
+        const ambientLight = new THREE.AmbientLight();
         ambientLight.color.setHSL(hue, 0.5, 0.5);
+        this.scene.add(ambientLight);
     }
 
     // Add method to update mouse sensitivity
