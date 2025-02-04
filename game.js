@@ -1320,6 +1320,25 @@ class ParkourGame {
                 break;
         }
     }
+
+    clearLevel() {
+        // Remove all obstacles
+        while(this.obstacles.length > 0) {
+            const obstacle = this.obstacles.pop();
+            this.scene.remove(obstacle);
+        }
+        
+        // Reset player position
+        if (this.player) {
+            this.player.position.set(0, 0, 0);
+            this.velocity.set(0, 0, 0);
+        }
+        
+        // Reset AI if active
+        if (this.aiPlayer) {
+            this.aiPlayer.reset();
+        }
+    }
 }
 
 // AI Implementation

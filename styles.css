@@ -273,4 +273,10 @@ button {
 
 .menu-button.primary:hover {
     background: #45a049;
+}
+
+.setting-select option:disabled,
+.difficulty-select option:disabled {
+    color: #666;
+    font-style: italic;
 } 
