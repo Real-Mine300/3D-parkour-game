@@ -82,11 +82,7 @@ class ParkourGame {
         this.maxCombo = 0;
         this.lastPlatformTime = 0;
         
-        // Add post-processing effects
-        this.composer = new THREE.EffectComposer(this.renderer);
-        this.addPostProcessing();
-        
-        // Add dynamic lighting
+        // Keep dynamic lighting
         this.addDynamicLighting();
         
         this.platformAnimations = [];
@@ -125,6 +121,9 @@ class ParkourGame {
             
             // Load first level
             this.loadLevel(1);
+            
+            // Start animation loop
+            this.animate();
             
             console.log('Game initialized successfully');
         } catch (error) {
@@ -1208,15 +1207,6 @@ class ParkourGame {
             this.scene.add(particle);
         }
         return particles;
-    }
-
-    addPostProcessing() {
-        const bloomPass = new THREE.UnrealBloomPass();
-        bloomPass.strength = 0.5;
-        this.composer.addPass(bloomPass);
-        
-        const glowPass = new THREE.ShaderPass(/* custom glow shader */);
-        this.composer.addPass(glowPass);
     }
 
     addDynamicLighting() {
